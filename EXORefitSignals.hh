@@ -53,7 +53,6 @@ class EXORefitSignals : public EXOAnalysisModule
   std::map<unsigned char, TGraph*> fGainMaps;
   std::vector<unsigned char> fChannels;
   size_t fFirstAPDChannelIndex;
-  size_t fColumnLength;
 
   double GetGain(unsigned char channel) const;
 
@@ -67,24 +66,13 @@ class EXORefitSignals : public EXOAnalysisModule
   mutable TStopwatch fWatch_MatrixMul;
   mutable TStopwatch fWatch_MatrixMul_NoiseTerms;
 
-  std::map<unsigned char, double> fExpectedYieldPerGang; // Expected magnitudes of Th gamma line (ADC).
-  std::vector<double> fmodel_realimag;
-  double fUnixTimeOfEvent;
-  double fExpectedEnergy_keV;
   const double fThoriumEnergy_keV;
   const size_t fMinF;
   const size_t fMaxF;
 
   // Wire digitization.
-  // fWireModel keeps, for each u-wire signal we're fitting, a pointer back to that signal plus
-  // model waveforms for channels which it affects.
-  // The map keys are software channels.
-  // The model waveforms are normalized so that the shaped deposition has a peak-baseline of 1 ADC.
-  // The ordering in the matrix is defined by the vector index, of course.
   EXODoubleWaveform fWireDeposit;
   EXODoubleWaveform fWireInduction;
-  std::vector<std::pair<EXOUWireSignal*,
-                        std::map<unsigned char, std::vector<double> > > > fWireModel;
   std::vector<double> MakeWireModel(EXODoubleWaveform& in,
                                     const EXOTransferFunction& transfer,
                                     const double Gain,
@@ -104,7 +92,54 @@ class EXORefitSignals : public EXOAnalysisModule
   bool DoBiCGSTAB(std::vector<double>& X,
                   double Threshold);
 
+
+  struct EventHandler {
+    // So we can grab the event again when we're done.
+    Int_t fRunNumber;
+    Int_t fEventNumber;
+    double fUnixTimeOfEvent;
+    size_t fColumnLength;
+
+    // fWireModel keeps, for each u-wire signal we're fitting:
+    //   the index of the u-wire signal within the event.
+    //   model waveforms for channels which it affects.
+    // The map keys are software channels.
+    // The model waveforms are normalized so that the shaped deposition has a peak-baseline of 1 ADC.
+    // The ordering in the matrix is defined by the vector index, of course.
+    std::vector<std::pair<size_t,
+                          std::map<unsigned char, std::vector<double> > > > fWireModel;
+
+    // APD model information.
+    std::map<unsigned char, double> fExpectedYieldPerGang; // Expected magnitudes of Th gamma line (ADC).
+    std::vector<double> fmodel_realimag;
+    double fExpectedEnergy_keV; // For appropriate handling of Poisson noise.
+
+    // Information on the current status and data of the solver.
+    // We need enough information so that when a matrix multiplication with noise finishes,
+    // we can pick up the pieces.
+    // We can re-enter in the setup phase, just after computing V, or just after computing T.
+    // So, identify the phase based on which vectors have a size of zero.
+    std::vector<double> fX;
+    std::vector<double> fR;
+    std::vector<double> fP;
+    std::vector<double> fR0hat;
+    std::vector<double> fV; // only needed within an iteration.
+    std::vector<double> fAlpha; // only needed within an iteration.
+    std::vector<double> fR0hat_V_Inv; // only needed within an iteration; not strictly needed, but convenient.
+
+    // Where in the result matrix can we expect to find the required result?
+    size_t fResultIndex;
+  };
+  void DoBlBiCGSTAB_iteration(EventHandler& event);
+
+
   std::vector<double> MatrixTimesVector(const std::vector<double>& in) const;
+
+  // Functions to multiply by the noise matrix.
+  std::vector<double> fNoiseMulQueue;
+  std::vector<double> fNoiseMulResult;
+  size_t fNumVectorsInQueue;
+  void DoNoiseMultiplication();
 
   EXOWaveformFT GetModelForTime(double time) const;
 

@@ -6,4 +6,4 @@ This actually can also alleviate some of the pressure on me to re-implement clus
 
 Note that the whole matrix A is not identical event-by-event -- just the noise portions.  So, some care will need to be taken.  Additionally, I'll want to support events converging at different times.
 
-Basic plan:  the class should have two matrices (column-major), one of which is designated the queue for vectors needing to be multiplied.  Each event needs to track where it put its own vectors in the matrix.  When it's time, matrix multiplication gets called; then the queue gets swapped with the result matrix, so there's a place for events to retrieve their results and a place for them to put new requests.
+Basic plan:  the class should have two matrices (column-major), one of which is designated the queue for vectors needing to be multiplied.  Each event needs to track where it put its own vectors in the matrix.  When it's time, matrix multiplication gets called, and results are put into a result matrix.  The queue matrix is cleared, ready to accept new requests.

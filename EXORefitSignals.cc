@@ -1100,3 +1100,105 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
 
   return out;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
+{
+  // Pick up wherever we left off.
+  // This function gets called when a noise matrix multiplication just happened.
+  // So, we have to first identify where we are, then proceed as far as we can until:
+  //   Another matrix multiplication needs to be done, or
+  //   The solver has terminated.
+
+  if(event.fR.size() == 0) {
+    // We're still in the setup phase.
+    size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
+    fR.assign(event.fColLength * (event.fWireModel.size()+1), 0);
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
+      for(size_t j = 0; j < NoiseColLength; j++) {
+        event.fR[i*event.fColumnLength + j] = fNoiseMulResult[IndexToGrab + j];
+      }
+    }
+    // Now need to finish multiplying by A, accounting for the other terms.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void EXORefitSignals::DoNoiseMultiplication()
+{
+  // Multiply everything in fNoiseMulQueue by the noise.
+  // Note that we expect columns in the input to contain only the noise portion, not the constraint rows;
+  // otherwise, the vector lengths would not match.
+  // The result is placed in fNoiseMulResult.
+  size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
+  assert(fNoiseMulQueue.size() == NoiseColLength * fNumVectorsInQueue;
+  fNoiseMulResult.assign(fNoiseMulQueue.size(), 0); // Probably don't need to fill with 0.
+
+  // Do the multiplication -- one call for every frequency.
+  fWatch_MatrixMul_NoiseTerms.Start(false); // Don't count vector allocation.
+  for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+    size_t StartIndex = 2*fChannels.size()*f;
+    size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                BlockSize, fNumVectorsInQueue, BlockSize,
+                1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], NoiseColLength,
+                0, &fNoiseMulResult[StartIndex], NoiseColLength);
+  }
+  fWatch_MatrixMul_NoiseTerms.Stop();
+
+  // Clean up, to be ready for the next call.
+  fNoiseMulQueue.clear(); // Hopefully doesn't free memory, since I'll need it again.
+  fNumVectorsInQueue = 0;
+}
