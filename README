@@ -1,0 +1,9 @@
+I've got a refit-apds module in (my copy of) EXOAnalysis, but it is severely time-consuming, with all of the time being taken up by either matrix-vector multiplication or matrix multiplication with skinny matrices.  I'm using BLAS, but gemm can't do much with skinny matrices, so the performance is still insufficient.
+
+However, in fact the matrices we're multiplying by are reused many times -- so there should be much more opportunity for BLAS to help if I can "package" many skinny matrices into one fat one.  That requires packaging multiple EXOEventData events together and handling them in parallel, which EXOAnalysis can't accommodate.  Thus the need for a standalone version of the code.
+
+This actually can also alleviate some of the pressure on me to re-implement clustering, grid corrections, gain corrections, and purity corrections -- after running the standalone program, we could just rerun the needed components of EXOAnalysis and accomplish these things.
+
+Note that the whole matrix A is not identical event-by-event -- just the noise portions.  So, some care will need to be taken.  Additionally, I'll want to support events converging at different times.
+
+Basic plan:  the class should have two matrices (column-major), one of which is designated the queue for vectors needing to be multiplied.  Each event needs to track where it put its own vectors in the matrix.  When it's time, matrix multiplication gets called; then the queue gets swapped with the result matrix, so there's a place for events to retrieve their results and a place for them to put new requests.
