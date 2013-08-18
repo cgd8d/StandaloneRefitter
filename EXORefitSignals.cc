@@ -278,8 +278,8 @@ int EXORefitSignals::Initialize()
   fWatch_ProcessEvent.Reset();
   fWatch_InitialGuess.Reset();
   fWatch_Solve.Reset();
-  fWatch_MatrixMul.Reset();
-  fWatch_MatrixMul_NoiseTerms.Reset();
+  fWatch_NoiseMul.Reset();
+  fWatch_RestMul.Reset();
   return 0;
 }
 
@@ -635,11 +635,10 @@ int EXORefitSignals::ShutDown()
   fWatch_InitialGuess.Print();
   std::cout<<"Solving the matrix:"<<std::endl;
   fWatch_Solve.Print();
-  std::cout<<"Multiplying the matrix by vectors (excluding allocation of return vector):"<<std::endl;
-  fWatch_MatrixMul.Print();
-  std::cout<<"Handling noise correlation part of matrix (the bottleneck):"<<std::endl;
-  fWatch_MatrixMul_NoiseTerms.Print();
-  std::cout<<std::endl;
+  std::cout<<"Multiplying by noise blocks:"<<std::endl;
+  fWatch_NoiseMul.Print();
+  std::cout<<"Multiplying by the rest of the matrix entries:"<<std::endl;
+  fWatch_RestMul.Print();
   std::cout<<"Average number of iterations to solve: "
            <<double(fTotalNumberOfIterationsDone)/fNumEntriesSolved<<std::endl;
   std::cout<<"Alone, the wires would have required "
@@ -957,116 +956,6 @@ void EXORefitSignals::BiCGSTAB_iteration(std::vector<double>& X,
   std::swap(T, P);
 }
 
-std::vector<double> EXORefitSignals::MatrixTimesVector(const std::vector<double>& in) const
-{
-  // Do A*in; return the result.
-  // Notice that means we're doing some unnecessary heap allocations;
-  // consider in the future reusing the memory of these vectors.
-  // If Fast is set to a non-zero value, it indicates we should perform multiplication by
-  // some approximation of the matrix which will speed things up.
-  // In general the higher the number, the faster the multiplication, but this is for internal use
-  // so I make no promises.
-
-  assert(in.size() == fColumnLength * (fWireModel.size()+1));
-  std::vector<double> out;
-  out.assign(in.size(), 0);
-
-  // Note that I want to exclude vector allocation in the time --
-  // because in principle that could be eliminated if the computational part ever became sub-dominant.
-  fWatch_MatrixMul.Start(false);
-
-  // First, do the noise blocks.
-  // This has, in the past, been the bottleneck -- but now I've designed everything to optimize it.
-  // Should keep an eye on it to ensure it remains the bottleneck.
-  fWatch_MatrixMul_NoiseTerms.Start(false);
-  for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-    size_t StartIndex = 2*fChannels.size()*f;
-    size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
-    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                BlockSize, fWireModel.size()+1, BlockSize,
-                1, &fNoiseCorrelations[f][0], BlockSize, &in[StartIndex], fColumnLength,
-                1, &out[StartIndex], fColumnLength);
-  }
-  fWatch_MatrixMul_NoiseTerms.Stop();
-
-  // Next, do the Poisson terms for APD channels.
-  for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) { // APD gangs
-    double ChannelFactors = fExpectedEnergy_keV/fThoriumEnergy_keV;
-    ChannelFactors *= GetGain(fChannels[k]);
-    ChannelFactors *= fExpectedYieldPerGang.at(fChannels[k]);
-
-    for(size_t n = 0; n <= fWireModel.size(); n++) { // signals
-      // Compute the factors common to all frequencies.
-      double CommonFactor = 0;
-      for(size_t g = 0; g <= fMaxF - fMinF; g++) {
-        size_t InIndex = n*fColumnLength + 2*fChannels.size()*g + k*(g < fMaxF-fMinF ? 2 : 1);
-        CommonFactor += fmodel_realimag[2*g] * in[InIndex];
-        if(g < fMaxF-fMinF) CommonFactor += fmodel_realimag[2*g+1] * in[InIndex+1];
-      }
-      CommonFactor *= ChannelFactors;
-
-      // Now actually transfer the changes to the out vector.
-      for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-        size_t OutIndex = n*fColumnLength + 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
-        out[OutIndex] += CommonFactor * fmodel_realimag[2*f];
-        if(f < fMaxF-fMinF) out[OutIndex+1] += CommonFactor * fmodel_realimag[2*f+1];
-      }
-    }
-  } // End Poisson terms.
-
-  // Lagrange and constraint terms.
-  // First loop through wire signals.
-  for(size_t m = 0; m < fWireModel.size(); m++) {
-    const std::map<unsigned char, std::vector<double> >& models = fWireModel[m].second;
-    for(std::map<unsigned char, std::vector<double> >::const_iterator it = models.begin();
-        it != models.end();
-        it++) {
-      unsigned char ChannelWithWireSignal = it->first;
-      size_t channel_index = 0;
-      while(fChannels[channel_index] != ChannelWithWireSignal) {
-        channel_index++;
-        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
-      }
-      const std::vector<double>& modelWF = it->second;
-      for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-        size_t Index1 = fColumnLength - (fWireModel.size()+1) + m;
-        size_t Index2 = 2*fChannels.size()*f + channel_index*(f < fMaxF-fMinF ? 2 : 1);
-        for(size_t n = 0; n <= fWireModel.size(); n++) {
-          out[Index2] += modelWF[2*f]*in[Index1];
-          out[Index1] += modelWF[2*f]*in[Index2];
-          if(f < fMaxF-fMinF) {
-            out[Index2+1] += modelWF[2*f+1]*in[Index1];
-            out[Index1] += modelWF[2*f+1]*in[Index2+1];
-          }
-          Index1 += fColumnLength;
-          Index2 += fColumnLength;
-        }
-      }
-    }
-  } // Done with Lagrange and constraint terms for wires.
-  // Now, Lagrange and constraint terms for APDs.
-  for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
-    double ExpectedYieldOnGang = fExpectedYieldPerGang.at(fChannels[k]);
-    for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-      size_t Index1 = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
-      size_t Index2 = fColumnLength - 1;
-      for(size_t n = 0; n <= fWireModel.size(); n++) {
-        out[Index2] += fmodel_realimag[2*f]*in[Index1];
-        out[Index1] += fmodel_realimag[2*f]*in[Index2];
-        if(f < fMaxF-fMinF) {
-          out[Index2] += fmodel_realimag[2*f+1]*in[Index1+1];
-          out[Index1+1] += fmodel_realimag[2*f+1]*in[Index2];
-        }
-        Index1 += fColumnLength;
-        Index2 += fColumnLength;
-      }
-    }
-  }
-
-  fWatch_MatrixMul.Stop();
-  return out;
-}
-
 std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
                                                    const EXOTransferFunction& transfer,
                                                    const double Gain,
@@ -1157,6 +1046,32 @@ void EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     // Now need to finish multiplying by A, accounting for the other terms.
+    DoRestOfMultiplication(event.fX, event.fR, event);
+    // Subtract B.
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      size_t Index = (i+1)*event.fColumnLength; // Next column; then subtract.
+      Index -= event.fWireModel.size() + 1; // Step backward.
+      Index += i; // Go forward to the right entry.
+      event.fR[Index] -= 1; // All models are normalized to 1.
+    }
+    // Now fR = AX - B; but we want B - AX.
+    for(size_t i = 0; i < event.fR.size(); i++) {
+      event.fR[i] = -event.fR[i];
+    }
+    // Set up other pieces of the handler.
+    event.fP = event.fR;
+    event.fR0hat = event.fR;
+    // Now we want V <- AP, so request a multiplication by P.
+    fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      for(size_t j = 0; j < NoiseColLength; j++) {
+        fNoiseMulQueue.push_back(event.fP[i*event.fColumnLength + j]);
+      }
+    }
+    fNumVectorsInQueue += event.fWireModel.size() + 1;
+    return;
+  }
+-- One entry down, two to go! --
 
 
 
@@ -1166,15 +1081,89 @@ void EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
 
 
 
+void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
+                                             std::vector<double>& out,
+                                             EventHandler& event)
+{
+  // After noise terms have already been handled, deal with all of the others.
+  // This should not be the bottleneck.
+  fWatch_RestMul.Start(false);
 
+  // Poisson terms for APD channels.
+  for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) { // APD gangs
+    double ChannelFactors = event.fExpectedEnergy_keV/fThoriumEnergy_keV;
+    ChannelFactors *= GetGain(fChannels[k]);
+    ChannelFactors *= event.fExpectedYieldPerGang.at(fChannels[k]);
 
+    for(size_t n = 0; n <= event.fWireModel.size(); n++) { // signals
+      // Compute the factors common to all frequencies.
+      double CommonFactor = 0;
+      for(size_t g = 0; g <= fMaxF - fMinF; g++) {
+        size_t InIndex = n*event.fColumnLength + 2*fChannels.size()*g + k*(g < fMaxF-fMinF ? 2 : 1);
+        CommonFactor += event.fmodel_realimag[2*g] * in[InIndex];
+        if(g < fMaxF-fMinF) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+1];
+      }
+      CommonFactor *= ChannelFactors;
 
+      // Now actually transfer the changes to the out vector.
+      for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+        size_t OutIndex = n*event.fColumnLength + 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
+        out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f];
+        if(f < fMaxF-fMinF) out[OutIndex+1] += CommonFactor * event.fmodel_realimag[2*f+1];
+      }
+    }
+  } // End Poisson terms.
 
-
-
-
-
-
+  // Lagrange and constraint terms.
+  // First loop through wire signals.
+  for(size_t m = 0; m < event.fWireModel.size(); m++) {
+    const std::map<unsigned char, std::vector<double> >& models = event.fWireModel[m].second;
+    for(std::map<unsigned char, std::vector<double> >::const_iterator it = models.begin();
+        it != models.end();
+        it++) {
+      unsigned char ChannelWithWireSignal = it->first;
+      size_t channel_index = 0;
+      while(fChannels[channel_index] != ChannelWithWireSignal) {
+        channel_index++;
+        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
+      }
+      const std::vector<double>& modelWF = it->second;
+      for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+        size_t Index1 = event.fColumnLength - (event.fWireModel.size()+1) + m;
+        size_t Index2 = 2*fChannels.size()*f + channel_index*(f < fMaxF-fMinF ? 2 : 1);
+        for(size_t n = 0; n <= event.fWireModel.size(); n++) {
+          out[Index2] += modelWF[2*f]*in[Index1];
+          out[Index1] += modelWF[2*f]*in[Index2];
+          if(f < fMaxF-fMinF) {
+            out[Index2+1] += modelWF[2*f+1]*in[Index1];
+            out[Index1] += modelWF[2*f+1]*in[Index2+1];
+          }
+          Index1 += event.fColumnLength;
+          Index2 += event.fColumnLength;
+        }
+      }
+    }
+  } // Done with Lagrange and constraint terms for wires.
+  // Now, Lagrange and constraint terms for APDs.
+  for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
+    double ExpectedYieldOnGang = event.fExpectedYieldPerGang.at(fChannels[k]);
+    for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+      size_t Index1 = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
+      size_t Index2 = event.fColumnLength - 1;
+      for(size_t n = 0; n <= event.fWireModel.size(); n++) {
+        out[Index2] += event.fmodel_realimag[2*f]*in[Index1];
+        out[Index1] += event.fmodel_realimag[2*f]*in[Index2];
+        if(f < fMaxF-fMinF) {
+          out[Index2] += event.fmodel_realimag[2*f+1]*in[Index1+1];
+          out[Index1+1] += event.fmodel_realimag[2*f+1]*in[Index2];
+        }
+        Index1 += event.fColumnLength;
+        Index2 += event.fColumnLength;
+      }
+    }
+  }
+  fWatch_RestMul.Stop();
+}
 
 void EXORefitSignals::DoNoiseMultiplication()
 {
@@ -1187,7 +1176,7 @@ void EXORefitSignals::DoNoiseMultiplication()
   fNoiseMulResult.assign(fNoiseMulQueue.size(), 0); // Probably don't need to fill with 0.
 
   // Do the multiplication -- one call for every frequency.
-  fWatch_MatrixMul_NoiseTerms.Start(false); // Don't count vector allocation.
+  fWatch_NoiseMul.Start(false); // Don't count vector allocation.
   for(size_t f = 0; f <= fMaxF - fMinF; f++) {
     size_t StartIndex = 2*fChannels.size()*f;
     size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
@@ -1196,7 +1185,7 @@ void EXORefitSignals::DoNoiseMultiplication()
                 1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], NoiseColLength,
                 0, &fNoiseMulResult[StartIndex], NoiseColLength);
   }
-  fWatch_MatrixMul_NoiseTerms.Stop();
+  fWatch_NoiseMul.Stop();
 
   // Clean up, to be ready for the next call.
   fNoiseMulQueue.clear(); // Hopefully doesn't free memory, since I'll need it again.

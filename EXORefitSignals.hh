@@ -63,8 +63,8 @@ class EXORefitSignals : public EXOAnalysisModule
   TStopwatch fWatch_ProcessEvent;
   TStopwatch fWatch_InitialGuess;
   TStopwatch fWatch_Solve;
-  mutable TStopwatch fWatch_MatrixMul;
-  mutable TStopwatch fWatch_MatrixMul_NoiseTerms;
+  TStopwatch fWatch_NoiseMul;
+  TStopwatch fWatch_RestMul;
 
   const double fThoriumEnergy_keV;
   const size_t fMinF;
@@ -133,13 +133,16 @@ class EXORefitSignals : public EXOAnalysisModule
   void DoBlBiCGSTAB_iteration(EventHandler& event);
 
 
-  std::vector<double> MatrixTimesVector(const std::vector<double>& in) const;
-
   // Functions to multiply by the noise matrix.
   std::vector<double> fNoiseMulQueue;
   std::vector<double> fNoiseMulResult;
   size_t fNumVectorsInQueue;
   void DoNoiseMultiplication();
+
+  // Function to perform the rest of matrix multiplication.
+  void DoRestOfMultiplication(const std::vector<double>& in,
+                              std::vector<double>& out,
+                              EventHandler& event);
 
   EXOWaveformFT GetModelForTime(double time) const;
 
