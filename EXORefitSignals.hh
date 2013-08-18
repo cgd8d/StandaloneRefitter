@@ -85,10 +85,6 @@ class EXORefitSignals : public EXOAnalysisModule
   unsigned long int fTotalIterationsForAPDs;
 
   // Block-BiCGSTAB solver stuff.
-  void BiCGSTAB_iteration(std::vector<double>& X,
-                          std::vector<double>& R,
-                          std::vector<double>& P,
-                          const std::vector<double>& r0hat) const;
   bool DoBiCGSTAB(std::vector<double>& X,
                   double Threshold);
 
@@ -130,7 +126,7 @@ class EXORefitSignals : public EXOAnalysisModule
     // Where in the result matrix can we expect to find the required result?
     size_t fResultIndex;
   };
-  void DoBlBiCGSTAB_iteration(EventHandler& event);
+  bool DoBlBiCGSTAB_iteration(EventHandler& event);
 
 
   // Functions to multiply by the noise matrix.

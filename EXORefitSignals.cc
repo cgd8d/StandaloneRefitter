@@ -859,103 +859,6 @@ bool EXORefitSignals::DoBiCGSTAB(std::vector<double>& X,
   return false;
 }
 
-void EXORefitSignals::BiCGSTAB_iteration(std::vector<double>& X,
-                                         std::vector<double>& R,
-                                         std::vector<double>& P,
-                                         const std::vector<double>& r0hat) const
-{
-  // Accept input in; do another iteration, and return the next iteration.
-  // Does not bother with recycling any memory -- to revisit.
-  // No pre-conditioning.  I just wanted something simple to implement here.
-
-  // In a single iteration, we have need of at most three SxS matrices at a time.
-  // So, go ahead and create them now, to reuse as needed.
-  std::vector<double> SmallMat1, SmallMat2, SmallMat3;
-  SmallMat1.resize((fWireModel.size()+1)*(fWireModel.size()+1));
-  SmallMat2.resize((fWireModel.size()+1)*(fWireModel.size()+1));
-  SmallMat3.resize((fWireModel.size()+1)*(fWireModel.size()+1));
-
-  // Compute V.
-  std::vector<double> V = MatrixTimesVector(P);
-
-  // Compute the SxS matrix Rhat_0^T V.
-  cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-              fWireModel.size() + 1, fWireModel.size() + 1, fColumnLength,
-              1, &r0hat[0], fColumnLength, &V[0], fColumnLength,
-              0, &SmallMat1[0], fWireModel.size() + 1);
-
-  // Compute its inverse (which we'll use twice).
-  // Do it the easy (and inefficient) way, using a TMatrixD.
-  // Overwrite SmallMat1 with its own inverse.
-  TMatrixD SmallMat1_TMat(fWireModel.size()+1, fWireModel.size()+1);
-  for(size_t i = 0; i < SmallMat1.size(); i++) {
-    SmallMat1_TMat(i % (fWireModel.size()+1), i / (fWireModel.size()+1)) = SmallMat1[i];
-  }
-  SmallMat1_TMat.InvertFast();
-  for(size_t i = 0; i < SmallMat1.size(); i++) {
-    SmallMat1[i] = SmallMat1_TMat(i % (fWireModel.size()+1), i / (fWireModel.size()+1));
-  }
-
-  // Compute the SxS matrix Rhat_0^T R.
-  cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-              fWireModel.size() + 1, fWireModel.size() + 1, fColumnLength,
-              1, &r0hat[0], fColumnLength, &R[0], fColumnLength,
-              0, &SmallMat2[0], fWireModel.size() + 1);
-
-  // Solve for alpha = SmallMat3.
-  cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-              fWireModel.size() + 1, fWireModel.size() + 1, fWireModel.size() + 1,
-              1, &SmallMat1[0], fWireModel.size() + 1, &SmallMat2[0], fWireModel.size() + 1,
-              0, &SmallMat3[0], fWireModel.size() + 1);
-
-
-  // Modify R.
-  cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-              fColumnLength, fWireModel.size() + 1, fWireModel.size() + 1,
-              -1, &V[0], fColumnLength, &SmallMat3[0], fWireModel.size() + 1,
-               1, &R[0], fColumnLength);
-
-  // Compute T.
-  std::vector<double> T = MatrixTimesVector(R);
-
-  // Compute omega.
-  double omega = std::inner_product(T.begin(), T.end(), R.begin(), double(0)) /
-                 std::inner_product(T.begin(), T.end(), T.begin(), double(0));
-
-  // Modify X.
-  cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-              fColumnLength, fWireModel.size() + 1, fWireModel.size() + 1,
-              1, &P[0], fColumnLength, &SmallMat3[0], fWireModel.size() + 1,
-              1, &X[0], fColumnLength);
-  for(size_t i = 0; i < X.size(); i++) X[i] += omega*R[i];
-
-  // Modify R.
-  for(size_t i = 0; i < R.size(); i++) R[i] -= omega*T[i];
-
-  // What follows is wasted if this is the last iteration -- but that's probably small overhead.
-
-  // Compute the SxS matrix -Rhat_0^T T.
-  cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-              fWireModel.size() + 1, fWireModel.size() + 1, fColumnLength,
-              -1, &r0hat[0], fColumnLength, &T[0], fColumnLength,
-              0, &SmallMat2[0], fWireModel.size() + 1);
-
-  // Solve for beta = SmallMat3.
-  cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-              fWireModel.size() + 1, fWireModel.size() + 1, fWireModel.size() + 1,
-              1, &SmallMat1[0], fWireModel.size() + 1, &SmallMat2[0], fWireModel.size() + 1,
-              0, &SmallMat3[0], fWireModel.size() + 1);
-
-  // Finally, update P.  Overwrite T for temporary work.
-  T = R;
-  for(size_t i = 0; i < P.size(); i++) P[i] -= omega*V[i];
-  cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-              fColumnLength, fWireModel.size() + 1, fWireModel.size() + 1,
-              1, &P[0], fColumnLength, &SmallMat3[0], fWireModel.size() + 1,
-              1, &T[0], fColumnLength);
-  std::swap(T, P);
-}
-
 std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
                                                    const EXOTransferFunction& transfer,
                                                    const double Gain,
@@ -1027,17 +930,22 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
 
 
 
-void EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
+bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
 {
   // Pick up wherever we left off.
   // This function gets called when a noise matrix multiplication just happened.
   // So, we have to first identify where we are, then proceed as far as we can until:
   //   Another matrix multiplication needs to be done, or
   //   The solver has terminated.
+  // If the solver terminates, return true; otherwise, return false.
+  // For more information on the Block-BiCGSTAB algorithm, see:
+  // Electronic Transactions on Numerical Analysis, vol 16, 129-142 (2003).
+  // "A BLOCK VERSION OF BICGSTAB FOR LINEAR SYSTEMS WITH MULTIPLE RIGHT-HAND SIDES"
+  // A. EL GUENNOUNI, K. JBILOU, AND H. SADOK.
+  size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
 
   if(event.fR.size() == 0) {
     // We're still in the setup phase.
-    size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
     fR.assign(event.fColLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
@@ -1062,6 +970,7 @@ void EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     event.fP = event.fR;
     event.fR0hat = event.fR;
     // Now we want V <- AP, so request a multiplication by P.
+    event.fResultIndex = fNoiseMulQueue.size();
     fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       for(size_t j = 0; j < NoiseColLength; j++) {
@@ -1069,17 +978,136 @@ void EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
-    return;
+    return false;
   }
--- One entry down, two to go! --
-
-
-
-
-
-
-
-
+  else if(event.fV.size() == 0) {
+    // At the beginning of the iteration, we just computed V = AP.
+    fV.assign(event.fColLength * (event.fWireModel.size()+1), 0);
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
+      for(size_t j = 0; j < NoiseColLength; j++) {
+        event.fV[i*event.fColumnLength + j] = fNoiseMulResult[IndexToGrab + j];
+      }
+    }
+    // Now need to finish multiplying by A, accounting for the other terms.
+    DoRestOfMultiplication(event.fP, event.fV, event);
+    // Compute fR0hat_V_Inv.
+    // (Taking the actual inverse is probably not the most efficient approach,
+    //  but it's the easiest and this is a small matrix.
+    //  Plus, I'll use it twice, so we get to reuse this work.)
+    event.fR0hat_V_Inv.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
+                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
+                1, &event.fR0hat[0], event.fColumnLength, &event.fV[0], event.fColumnLength,
+                0, &event.fR0hat_V_Inv[0], event.fWireModel.size() + 1);
+    TMatrixD RootMatrix(fWireModel.size()+1, fWireModel.size()+1); // For now, avoid using LAPACK.
+    for(size_t i = 0; i < event.fR0hat_V_Inv.size(); i++) {
+      RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1)) = event.fR0hat_V_Inv[i];
+    }
+    RootMatrix.InvertFast();
+    for(size_t i = 0; i < RootMatrix.size(); i++) {
+      event.fR0hat_V_Inv[i] = RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1));
+    }
+    // Compute R0hat_R.
+    std::vector<double> R0hat_R((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
+                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
+                1, &event.fR0hat[0], event.fColumnLength, &event.fR[0], event.fColumnLength,
+                0, &R0hat_R[0], event.fWireModel.size() + 1);
+    // Now compute alpha.
+    event.fAlpha.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
+                1, &event.fR0hat_V_Inv[0], event.fWireModel.size() + 1,
+                &R0hat_R[0], event.fWireModel.size() + 1,
+                0, &event.fAlpha[0], event.fWireModel.size() + 1);
+    // Update R <-- R - V*alpha.
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
+                -1, &event.fV[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
+                1, &event.fR[0], event.fColumnLength);
+    // Now we desire T = AR (AS in paper).  Request a matrix multiplication, and return.
+    event.fResultIndex = fNoiseMulQueue.size();
+    fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      for(size_t j = 0; j < NoiseColLength; j++) {
+        fNoiseMulQueue.push_back(event.fR[i*event.fColumnLength + j]);
+      }
+    }
+    fNumVectorsInQueue += event.fWireModel.size() + 1;
+    return false;
+  }
+  else {
+    // We're in the second half of the iteration, where T was just computed.
+    std::vector<double> T(event.fColLength * (event.fWireModel.size()+1), 0);
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
+      for(size_t j = 0; j < NoiseColLength; j++) {
+        T[i*event.fColumnLength + j] = fNoiseMulResult[IndexToGrab + j];
+      }
+    }
+    // Now need to finish multiplying by A, accounting for the other terms.
+    DoRestOfMultiplication(event.fR, T, event);
+    // Compute omega.
+    double omega = std::inner_product(T.begin(), T.end(), event.fR.begin(), double(0)) /
+                   std::inner_product(T.begin(), T.end(), T.begin(), double(0));
+    // Modify X.
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
+                1, &event.fP[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
+                1, &event.fX[0], event.fColumnLength);
+    for(size_t i = 0; i < event.fX.size(); i++) event.fX[i] += omega*event.fR[i];
+    // Modify R.
+    for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] -= omega*T[i];
+    // Check if we should conclude here -- R is the residual matrix.
+    double WorstNorm = 0;
+    for(size_t col = 0; col <= event.fWireModel.size(); col++) {
+      size_t ColIndex = col*event.fColumnLength;
+      size_t NextCol = ColIndex + event.fColumnLength;
+      double Norm = std::inner_product(event.fR.begin() + ColIndex,
+                                       event.fR.begin() + NextCol,
+                                       event.fR.begin() + ColIndex,
+                                       double(0));
+      if(Norm > WorstNorm) WorstNorm = Norm;
+    }
+    if(WorstNorm < Threshold*Threshold) return true;
+    // Compute R0hat_T.
+    std::vector<double> R0hat_T((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
+                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
+                1, &event.fR0hat[0], event.fColumnLength, &T[0], event.fColumnLength,
+                0, &R0hat_T[0], event.fWireModel.size() + 1);
+    // Now compute beta = -fR0hat_V_Inv * R0hat_T.
+    std::vector<double> Beta((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
+                -1, &event.fR0hat_V_Inv[0], event.fWireModel.size() + 1,
+                &R0hat_T[0], event.fWireModel.size() + 1,
+                0, &Beta[0], event.fWireModel.size() + 1);
+    // Update P.  Overwrite T for temporary work.
+    T = event.fR;
+    for(size_t i = 0; i < event.fP.size(); i++) event.fP[i] -= omega*event.fV[i];
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                fColumnLength, fWireModel.size() + 1, fWireModel.size() + 1,
+                1, &P[0], fColumnLength, &Beta[0], fWireModel.size() + 1,
+                1, &T[0], fColumnLength);
+    std::swap(T, P);
+    // Clear vectors in event which are no longer needed -- this helps us keep track of where we are.
+    event.fV.clear();
+    event.fAlpha.clear();
+    event.fR0hat_V_Inv.clear();
+    // And request AP.
+    event.fResultIndex = fNoiseMulQueue.size();
+    fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      for(size_t j = 0; j < NoiseColLength; j++) {
+        fNoiseMulQueue.push_back(event.fP[i*event.fColumnLength + j]);
+      }
+    }
+    fNumVectorsInQueue += event.fWireModel.size() + 1;
+    return false;
+  }
+}
 
 void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
                                              std::vector<double>& out,
