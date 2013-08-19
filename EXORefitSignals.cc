@@ -104,7 +104,25 @@ void cblas_dgemm(const CBLAS_ORDER Order, const CBLAS_TRANSPOSE TransA,
 }
 #endif
 
-IMPLEMENT_EXO_ANALYSIS_MODULE(EXORefitSignals, "refit-signals")
+EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
+                                 TTree& wfTree,
+                                 EXOTreeOutputModule& outputModule)
+: fInputModule(inputModule),
+  fWFTree(wfTree),
+  fOutputModule(outputModule),
+  fLightmapFilename("data/lightmap/LightMaps.root"),
+  fRThreshold(0.1),
+  fThoriumEnergy_keV(2615),
+  fMinF(1),
+  fMaxF(1024),
+  fNumEntriesSolved(0),
+  fTotalNumberOfIterationsDone(0),
+  fTotalIterationsForWires(0),
+  fTotalIterationsForAPDs(0)
+{
+  fWFEvent = NULL;
+  fWFTree.SetBranchAddress("EventBranch", &fWFEvent);
+}
 
 int EXORefitSignals::TalkTo(EXOTalkToManager* tm)
 {
@@ -690,7 +708,7 @@ EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
   return fwf;
 }
 
-double EXORefitSignals::GetGain(unsigned char channel) const
+double EXORefitSignals::GetGain(unsigned char channel, EventHandler& event) const
 {
   // Return the gain of an apd channel.  This is the conversion factor from number
   // of photons incident on the APD to number of ADC counts (peak-baseline) in the
@@ -784,7 +802,7 @@ double EXORefitSignals::GetGain(unsigned char channel) const
   }
   // Time-dependence from the gainmap.
   const TGraph* GainGraph = fGainMaps.at(channel);
-  Gain *= GainGraph->Eval(fUnixTimeOfEvent)/GainGraph->Eval(1355409118.254096);
+  Gain *= GainGraph->Eval(event.fUnixTimeOfEvent)/GainGraph->Eval(1355409118.254096);
 
   Gain *= 32.e-9; // Convert from electrons to volts in the preamp. Roughly 1/(5 pF) gain.
   Gain *= 12.10; // Gain from shapers (amplification factor, and gain from transfer function.
@@ -918,6 +936,10 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
 
 
 
+std::list<EventHandler*> EXORefitSignals::AcceptEvent(EXOEventData* ED)
+{
+  // Push in one more event to handle; return whatever events are able to finish.
+  // Note that we won't start doing matrix multiplications until enough vectors are on the queue.
 
 
 
@@ -927,8 +949,107 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
 
 
 
+void EXORefitSignals::FlushEvents()
+{
+  // Finish processing for all events in the event handler list,
+  // regardless of how many pending multiplication requests are queued.
 
+  while(not fEventHandlerList.empty()) {
+    DoNoiseMultiplication();
+    std::list<EventHandler*>::iterator it = fEventHandlerList.begin();
+    while(it != fEventHandlerList.end()) {
+      bool Result = DoBlBiCGSTAB(**it);
+      if(Result) {
+        // This event is done.
+        FinishEvent(*it); // Deletes the EventHandler object.
+        it = fEventHandlerList.erase(it); // Removes it from the list.
+      }
+      else {
+        it++;
+      }
+    }
+    if(fNumVectorsInQueue == 0 xor fEventHandlerList.empty()) { // Sanity check.
+      LogEXOMsg("Inconsistent state between fNumVectorsInQueue and fEventHandlerList", EEAlert);
+    }
+  }
+}
 
+void EXORefitSignals::FinishEvent(EventHandler* event)
+{
+  // Compute and fill denoised signals, as appropriate.
+  // Then pass the filled event to the output module.
+  EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
+
+  // We need to clear out the denoised information here, since we just freshly read the event from file.
+  for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
+    ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
+  }
+  for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
+    ED->GetUWireSignal(i)->fDenoisedEnergy = 0;
+  }
+  for(size_t i = 0; i < ED->GetNumChargeClusters(); i++) {
+    ED->GetChargeCluster(i)->fDenosiedEnergy = 0;
+  }
+
+  if(not event.fX.empty()) {
+    // We need to compute denoised signals.
+    fWFTree.GetEntryWithIndex(ED->fRunNumber, ED->fEventNumber);
+
+    // Collect the fourier-transformed waveforms.  Save them split into real and complex parts.
+    std::vector<EXODoubleWaveform> WF_real, WF_imag;
+    for(size_t i = 0; i < fChannels.size(); i++) {
+      const EXOWaveform* wf = fWFEvent->GetWaveformData()->GetWaveformWithChannel(fChannels[i]);
+
+      // Take the Fourier transform.
+      EXODoubleWaveform dwf = wf->Convert<Double_t>();
+      EXOWaveformFT fwf;
+      EXOFastFourierTransformFFTW::GetFFT(dwf.GetLength()).PerformFFT(dwf, fwf);
+
+      // Extract the real part.
+      EXODoubleWaveform rwf;
+      rwf.SetLength(fwf.GetLength());
+      for(size_t f = 0; f < fwf.GetLength(); f++) rwf[f] = fwf[f].real();
+      WF_real.push_back(rwf);
+
+      // Extract the imaginary part.
+      // Note that the first and last components are strictly real (though we get them anyway).
+      EXODoubleWaveform iwf;
+      iwf.SetLength(fwf.GetLength());
+      for(size_t f = 0; f < fwf.GetLength(); f++) iwf[f] = fwf[f].imag();
+      WF_imag.push_back(iwf);
+    }
+
+    // Produce estimates of the signals.
+    std::vector<double> Results(event->fWireModel.size()+1, 0);
+    for(size_t i = 0; i < Results.size(); i++) {
+      for(size_t f = 0; f <= fMaxF-fMinF; f++) {
+        for(size_t chan_index = 0; chan_index < fChannels.size(); chan_index++) {
+          size_t XIndex = event->fColumnLength*i + 2*fChannels.size()*f + chan_index*(f < fMaxF-fMinF ? 2 : 1);
+          Results[i] += event->fX[XIndex]*WF_real[chan_index][f+fMinF];
+          if(f < fMaxF-fMinF) Results[i] += event->fX[XIndex+1]*WF_imag[chan_index][f+fMinF];
+        }
+      }
+    }
+
+    // Translate signal magnitudes into corresponding objects.
+    const EXOUWireGains* GainsFromDatabase = GetCalibrationFor(EXOUWireGains,
+                                                               EXOUWireGainsHandler,
+                                                               "source_calibration",
+                                                               ED->fEventHeader);
+    for(size_t i = 0; i < event->fWireModel.size(); i++) {
+      size_t sigIndex = event->fWireModel[i].first;
+      EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
+      double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
+                                  (CLHEP::keV * ADC_BITS);
+      double GainCorrection = GainsFromDatabase->GetGainOnChannel(sig->fChannel)/300.0;
+      sig->fDenoisedEnergy = Results[i]*GainCorrection*UWireScalingFactor;
+    }
+    ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
+  } // End setting of denoised energy signals.
+
+  fOutputModule.ProcessEvent(ED);
+  delete event;
+}
 
 bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
 {
@@ -1120,7 +1241,7 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
   // Poisson terms for APD channels.
   for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) { // APD gangs
     double ChannelFactors = event.fExpectedEnergy_keV/fThoriumEnergy_keV;
-    ChannelFactors *= GetGain(fChannels[k]);
+    ChannelFactors *= GetGain(fChannels[k], event);
     ChannelFactors *= event.fExpectedYieldPerGang.at(fChannels[k]);
 
     for(size_t n = 0; n <= event.fWireModel.size(); n++) { // signals

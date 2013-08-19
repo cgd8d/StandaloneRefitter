@@ -7,3 +7,30 @@ This actually can also alleviate some of the pressure on me to re-implement clus
 Note that the whole matrix A is not identical event-by-event -- just the noise portions.  So, some care will need to be taken.  Additionally, I'll want to support events converging at different times.
 
 Basic plan:  the class should have two matrices (column-major), one of which is designated the queue for vectors needing to be multiplied.  Each event needs to track where it put its own vectors in the matrix.  When it's time, matrix multiplication gets called, and results are put into a result matrix.  The queue matrix is cleared, ready to accept new requests.
+
+
+
+
+
+
+
+
+
+
+
+OK:  the solving is coming together well, but how we read and write events is getting ugly.
+
+One global EXOTreeInputModule; main() gets entries by entry number, from 0 to max or forever.
+It calls EXORefitSignals::ProcessEvent(EXOEventData* ED, Long64_t entryNumber), and entryNumber is what gets stored into the EventHandler instead of run/event.
+
+The EXORefitSignals module also has a reference to the tree input module, so it can get back events when necessary.  Furthermore, it is given a raw-waveform tree, so it can grab raw waveforms by index.
+
+And it is given a tree output module, so it can pass events (with extra denoising information) into the output file.
+
+
+
+
+
+
+
+

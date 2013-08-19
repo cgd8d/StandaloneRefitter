@@ -16,18 +16,10 @@ class EXOWaveformFT;
 class TH3D;
 class TGraph;
 
-class EXORefitSignals : public EXOAnalysisModule
+class EXORefitSignals
 {
  public:
-  EXORefitSignals() : fLightmapFilename("data/lightmap/LightMaps.root"),
-                      fRThreshold(0.1),
-                      fThoriumEnergy_keV(2615),
-                      fMinF(1),
-                      fMaxF(1024),
-                      fNumEntriesSolved(0),
-                      fTotalNumberOfIterationsDone(0),
-                      fTotalIterationsForWires(0),
-                      fTotalIterationsForAPDs(0) {}
+  EXORefitSignals(EXOTreeOutputModule& outputModule);
   int TalkTo(EXOTalkToManager *tm);
   int Initialize();
   EXOAnalysisModule::EventStatus ProcessEvent(EXOEventData *ED);
@@ -38,6 +30,48 @@ class EXORefitSignals : public EXOAnalysisModule
   void SetRThreshold(double threshold) { fRThreshold = threshold; }
 
  protected:
+
+  // Handles so that we can read events in and save events as necessary.
+  EXOTreeInputModule& fInputModule;
+  TTree& fWFTree;
+  EXOEventData* fWFEvent;
+  EXOTreeOutputModule& fOutputModule;
+
+  struct EventHandler {
+    // So we can grab the event again when we're done.
+    Long64_t fEntryNumber;
+    double fUnixTimeOfEvent;
+    size_t fColumnLength;
+
+    // fWireModel keeps, for each u-wire signal we're fitting:
+    //   the index of the u-wire signal within the event.
+    //   model waveforms for channels which it affects.
+    // The map keys are software channels.
+    // The model waveforms are normalized so that the shaped deposition has a peak-baseline of 1 ADC.
+    // The ordering in the matrix is defined by the vector index, of course.
+    std::vector<std::pair<size_t,
+                          std::map<unsigned char, std::vector<double> > > > fWireModel;
+    // APD model information.
+    std::map<unsigned char, double> fExpectedYieldPerGang; // Expected magnitudes of Th gamma line (ADC).
+    std::vector<double> fmodel_realimag;
+    double fExpectedEnergy_keV; // For appropriate handling of Poisson noise.
+
+    // Information on the current status and data of the solver.
+    // We need enough information so that when a matrix multiplication with noise finishes,
+    // we can pick up the pieces.
+    // We can re-enter in the setup phase, just after computing V, or just after computing T.
+    // So, identify the phase based on which vectors have a size of zero.
+    std::vector<double> fX;
+    std::vector<double> fR;
+    std::vector<double> fP;
+    std::vector<double> fR0hat;
+    std::vector<double> fV; // only needed within an iteration.
+    std::vector<double> fAlpha; // only needed within an iteration.
+    std::vector<double> fR0hat_V_Inv; // only needed within an iteration; not strictly needed, but convenient.
+
+    // Where in the result matrix can we expect to find the required result?
+    size_t fResultIndex;
+  };
 
   // fNoiseCorrelations[f-fMinF] stores the matrix of noise correlations at frequency f.
   // This matrix is a single contiguous array, ordered like:
@@ -54,7 +88,7 @@ class EXORefitSignals : public EXOAnalysisModule
   std::vector<unsigned char> fChannels;
   size_t fFirstAPDChannelIndex;
 
-  double GetGain(unsigned char channel) const;
+  double GetGain(unsigned char channel, EventHandler& event) const;
 
   double fRThreshold;
 
@@ -84,50 +118,13 @@ class EXORefitSignals : public EXOAnalysisModule
   unsigned long int fTotalIterationsForWires;
   unsigned long int fTotalIterationsForAPDs;
 
-  // Block-BiCGSTAB solver stuff.
-  bool DoBiCGSTAB(std::vector<double>& X,
-                  double Threshold);
+  // Interact with files.
+  std::list<EventHandler*> fEventHandlerList;
+  void FlushEvents();
+  void FinishEvent(EventHandler* event);
 
-
-  struct EventHandler {
-    // So we can grab the event again when we're done.
-    Int_t fRunNumber;
-    Int_t fEventNumber;
-    double fUnixTimeOfEvent;
-    size_t fColumnLength;
-
-    // fWireModel keeps, for each u-wire signal we're fitting:
-    //   the index of the u-wire signal within the event.
-    //   model waveforms for channels which it affects.
-    // The map keys are software channels.
-    // The model waveforms are normalized so that the shaped deposition has a peak-baseline of 1 ADC.
-    // The ordering in the matrix is defined by the vector index, of course.
-    std::vector<std::pair<size_t,
-                          std::map<unsigned char, std::vector<double> > > > fWireModel;
-
-    // APD model information.
-    std::map<unsigned char, double> fExpectedYieldPerGang; // Expected magnitudes of Th gamma line (ADC).
-    std::vector<double> fmodel_realimag;
-    double fExpectedEnergy_keV; // For appropriate handling of Poisson noise.
-
-    // Information on the current status and data of the solver.
-    // We need enough information so that when a matrix multiplication with noise finishes,
-    // we can pick up the pieces.
-    // We can re-enter in the setup phase, just after computing V, or just after computing T.
-    // So, identify the phase based on which vectors have a size of zero.
-    std::vector<double> fX;
-    std::vector<double> fR;
-    std::vector<double> fP;
-    std::vector<double> fR0hat;
-    std::vector<double> fV; // only needed within an iteration.
-    std::vector<double> fAlpha; // only needed within an iteration.
-    std::vector<double> fR0hat_V_Inv; // only needed within an iteration; not strictly needed, but convenient.
-
-    // Where in the result matrix can we expect to find the required result?
-    size_t fResultIndex;
-  };
-  bool DoBlBiCGSTAB_iteration(EventHandler& event);
-
+  // Block BiCGSTAB algorithm.
+  bool DoBlBiCGSTAB(EventHandler& event);
 
   // Functions to multiply by the noise matrix.
   std::vector<double> fNoiseMulQueue;
@@ -140,8 +137,7 @@ class EXORefitSignals : public EXOAnalysisModule
                               std::vector<double>& out,
                               EventHandler& event);
 
+  // Produce the light model, used on all gangs.
   EXOWaveformFT GetModelForTime(double time) const;
-
- DEFINE_EXO_ANALYSIS_MODULE(EXORefitSignals)
 };
 #endif
