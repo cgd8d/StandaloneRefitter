@@ -1,7 +1,6 @@
 #ifndef EXORefitSignals_hh
 #define EXORefitSignals_hh
 
-#include "EXOAnalysisManager/EXOAnalysisModule.hh"
 #include "EXOUtilities/EXOTemplWaveform.hh"
 #include "TStopwatch.h"
 #include <string>
@@ -9,7 +8,6 @@
 #include <map>
 
 class EXOUWireSignal;
-class EXOTalkToManager;
 class EXOTransferFunction;
 class EXOEventData;
 class EXOWaveformFT;
@@ -19,15 +17,18 @@ class TGraph;
 class EXORefitSignals
 {
  public:
+  // Functions specified in the order they should be called.
   EXORefitSignals(EXOTreeOutputModule& outputModule);
-  int TalkTo(EXOTalkToManager *tm);
-  int Initialize();
-  EXOAnalysisModule::EventStatus ProcessEvent(EXOEventData *ED);
-  int ShutDown();
 
   void SetNoiseFilename(std::string name) { fNoiseFilename = name; }
   void SetLightmapFilename(std::string name) { fLightmapFilename = name; }
   void SetRThreshold(double threshold) { fRThreshold = threshold; }
+
+  int Initialize();
+  void AcceptEvent(EXOEventData* ED, Long64_t entryNum);
+  void FlushEvents();
+
+  ~EXORefitSignals();
 
  protected:
 
@@ -93,10 +94,6 @@ class EXORefitSignals
   double fRThreshold;
 
   // Various stopwatches, to understand the fraction of time spent actually solving the matrix.
-  TStopwatch fWatch_GetNoise;
-  TStopwatch fWatch_ProcessEvent;
-  TStopwatch fWatch_InitialGuess;
-  TStopwatch fWatch_Solve;
   TStopwatch fWatch_NoiseMul;
   TStopwatch fWatch_RestMul;
 
@@ -112,15 +109,8 @@ class EXORefitSignals
                                     const double Gain,
                                     const double Time) const;
 
-  // Collect statistics on the number of iterations required.
-  unsigned long int fNumEntriesSolved;
-  unsigned long int fTotalNumberOfIterationsDone;
-  unsigned long int fTotalIterationsForWires;
-  unsigned long int fTotalIterationsForAPDs;
-
   // Interact with files.
   std::list<EventHandler*> fEventHandlerList;
-  void FlushEvents();
   void FinishEvent(EventHandler* event);
 
   // Block BiCGSTAB algorithm.
