@@ -18,7 +18,10 @@ Should be called like:
 #include "EXOUtilities/EXOEventData.hh"
 #include "EXOAnalysisManager/EXOTreeInputModule.hh"
 #include "EXOAnalysisManager/EXOTreeOutputModule.hh"
+#include "TFile.h"
+#include "TTree.h"
 #include <iostream>
+#include <cstdlib>
 
 
 int main(int argc, char** argv)
@@ -31,17 +34,17 @@ int main(int argc, char** argv)
   EXOTreeInputModule InputModule;
   InputModule.SetFilename(argv[1]);
   TFile WaveformFile(argv[2]);
-  TTree* WaveformTree = WaveformFile.Get("tree");
+  TTree* WaveformTree = dynamic_cast<TTree*>(WaveformFile.Get("tree"));
 
   EXOTreeOutputModule OutputModule;
-  OutputModule.SetFilename(argv[3]);
+  OutputModule.SetOutputFilename(argv[3]);
   OutputModule.BeginOfRun(NULL); // OK, fine -- shortcut here, I assume input has only one run.
 
   int MaxEvents = 5; // Hard-code it for now.
   EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
   RefitSig.Initialize();
 
-  for(Long64_t entryNum = 0; entryNum < maxEvents; entryNum++) {
+  for(Long64_t entryNum = 0; entryNum < MaxEvents; entryNum++) {
     EXOEventData* ED = InputModule.GetEvent(entryNum);
     if(ED == NULL) break;
     RefitSig.AcceptEvent(ED, entryNum);

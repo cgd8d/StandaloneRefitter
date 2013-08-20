@@ -16,6 +16,8 @@
 
 #include "EXORefitSignals.hh"
 #include "EXOAnalysisManager/EXOGridCorrectionModule.hh"
+#include "EXOAnalysisManager/EXOTreeInputModule.hh"
+#include "EXOAnalysisManager/EXOTreeOutputModule.hh"
 #include "EXOCalibUtilities/EXOChannelMapManager.hh"
 #include "EXOCalibUtilities/EXOElectronicsShapers.hh"
 #include "EXOCalibUtilities/EXOUWireGains.hh"
@@ -31,6 +33,7 @@
 #include "EXOUtilities/EXOMiscUtil.hh"
 #include "EXOUtilities/EXOUWireSignal.hh"
 #include "TFile.h"
+#include "TTree.h"
 #include "TArrayI.h"
 #include "TH3D.h"
 #include "TGraph.h"
@@ -273,10 +276,6 @@ int EXORefitSignals::Initialize()
   fWireInduction /= MaxVal;
 
   // Initialize stopwatches too.
-  fWatch_GetNoise.Reset();
-  fWatch_ProcessEvent.Reset();
-  fWatch_InitialGuess.Reset();
-  fWatch_Solve.Reset();
   fWatch_NoiseMul.Reset();
   fWatch_RestMul.Reset();
   return 0;
@@ -436,72 +435,6 @@ double EXORefitSignals::GetGain(unsigned char channel, EventHandler& event) cons
   return Gain;
 }
 
-bool EXORefitSignals::DoBiCGSTAB(std::vector<double>& X,
-                                 double Threshold)
-{
-  // For more information on the Block-BiCGSTAB algorithm, see:
-  // Electronic Transactions on Numerical Analysis, vol 16, 129-142 (2003).
-  // "A BLOCK VERSION OF BICGSTAB FOR LINEAR SYSTEMS WITH MULTIPLE RIGHT-HAND SIDES"
-  // A. EL GUENNOUNI, K. JBILOU, AND H. SADOK.
-  // Do BiCGSTAB iterations until Threshold is met for all columns of X.
-  // Use the given strategy; it corresponds to the matrix-vector multiplication to use.
-  // Higher numbers will generally be faster, but only solve an approximation.
-  // Returns true if the iterations actually terminated.
-
-  // r_0 = b - Ax_0.  So compute Ax_0 - b, and then negate.
-  std::vector<double> R = MatrixTimesVector(X);
-  for(size_t i = 0; i <= fWireModel.size(); i++) {
-    size_t Index = (i+1)*fColumnLength; // Next column; then subtract.
-    Index -= fWireModel.size() + 1; // Step backward.
-    Index += i; // Go forward to the right entry.
-    R[Index] -= 1; // All models are normalized to 1.
-  }
-  for(size_t i = 0; i < R.size(); i++) {
-    R[i] = -R[i];
-  }
-
-  std::vector<double> P = R;
-  const std::vector<double> r0hat = R;
-
-  // Solve the system.  Do a maximum of 1000 iterations, but expect to terminate much sooner.
-  for(size_t i = 0; i < 1000; i++) {
-    BiCGSTAB_iteration(X, R, P, r0hat);
-    fTotalNumberOfIterationsDone++;
-
-    // R is the residual at this iteration.
-    // So, we should use it to test if the result is good enough.
-    // b is the same every time (not dependent on fExpectedEnergy_keV),
-    // so the permissible value |r| should be something we can find with trial and error.
-    // Use the worst column.
-    // The loop is currently split so I can understand the effect of APDs and wires on iterations.
-    double WorstNorm = 0;
-    for(size_t col = 0; col < fWireModel.size(); col++) {
-      size_t ColIndex = col*fColumnLength;
-      size_t NextCol = ColIndex + fColumnLength;
-      double Norm = std::inner_product(R.begin() + ColIndex,
-                                       R.begin() + NextCol,
-                                       R.begin() + ColIndex,
-                                       double(0));
-      if(Norm > WorstNorm) WorstNorm = Norm;
-    }
-    if(WorstNorm > Threshold*Threshold) fTotalIterationsForWires++;
-    for(size_t col = fWireModel.size(); col <= fWireModel.size(); col++) {
-      size_t ColIndex = col*fColumnLength;
-      size_t NextCol = ColIndex + fColumnLength;
-      double Norm = std::inner_product(R.begin() + ColIndex,
-                                       R.begin() + NextCol,
-                                       R.begin() + ColIndex,
-                                       double(0));
-      if(Norm > WorstNorm) WorstNorm = Norm;
-      if(Norm > Threshold*Threshold) fTotalIterationsForAPDs++;
-    }
-
-    if(WorstNorm < Threshold*Threshold) return true;
-  }
-
-  return false;
-}
-
 std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
                                                    const EXOTransferFunction& transfer,
                                                    const double Gain,
@@ -597,7 +530,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     event->fExpectedEnergy_keV += clu->fPurityCorrectedEnergy;
     for(size_t j = fFirstAPDChannelIndex; j < fChannels.size(); j++) {
       unsigned char gang = fChannels[j];
-      Double_t GainFuncVal = fGainMaps[gang]->Eval(fUnixTimeOfEvent);
+      Double_t GainFuncVal = fGainMaps[gang]->Eval(event->fUnixTimeOfEvent);
 
       // Make sure cluster is in the proper range for interpolation -- else return 0.
       Double_t LightMapVal;
@@ -620,7 +553,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // We just want to weight the clusters appropriately when we guess where light should be collected.
   // Divide out to ensure that at the end, a result of 1 corresponds to a 2615 keV event (roughly).
   for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
-    event->fExpectedYieldPerGang[fChannels[i]] /= fExpectedEnergy_keV;
+    event->fExpectedYieldPerGang[fChannels[i]] /= event->fExpectedEnergy_keV;
   }
 
   // If we don't expect any yield, then clearly there will be a degenerate matrix.
@@ -676,7 +609,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     const EXOTransferFunction& transferDep =
       electronicsShapers->GetTransferFunctionForChannel(sig->fChannel);
     double Gain = transferDep.GetGain();
-    double DepChanGain = GainsFromDatabase->GetGainOnChannel((*sigIt)->fChannel);
+    double DepChanGain = GainsFromDatabase->GetGainOnChannel(sig->fChannel);
     ModelForThisSignal[sig->fChannel] = MakeWireModel(fWireDeposit,
                                                       transferDep,
                                                       Gain,
@@ -694,7 +627,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
     if(EXOMiscUtil::TypeOfChannel(sig->fChannel+1) == EXOMiscUtil::kUWire) {
       const EXOTransferFunction& transferInd =
-        electronicsShapers->GetTransferFunctionForChannel((*sigIt)->fChannel+1);
+        electronicsShapers->GetTransferFunctionForChannel(sig->fChannel+1);
       double ThisChanGain = Gain * GainsFromDatabase->GetGainOnChannel(sig->fChannel+1)/DepChanGain;
       ModelForThisSignal[sig->fChannel+1] = MakeWireModel(fWireInduction,
                                                           transferInd,
@@ -709,7 +642,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fColumnLength = 2*fChannels.size()*(fMaxF-fMinF) + fChannels.size() + event->fWireModel.size() + 1;
 
   // Set up a simple, but not quite crazy, initial guess for X.
-  event->fX.assign(fColumnLength * (fWireModel.size() + 1), 0);
+  event->fX.assign(event->fColumnLength * (event->fWireModel.size() + 1), 0);
 
   // Start with the wires.
   for(size_t i = 0; i < event->fWireModel.size(); i++) {
@@ -847,10 +780,10 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     ED->GetUWireSignal(i)->fDenoisedEnergy = 0;
   }
   for(size_t i = 0; i < ED->GetNumChargeClusters(); i++) {
-    ED->GetChargeCluster(i)->fDenosiedEnergy = 0;
+    ED->GetChargeCluster(i)->fDenoisedEnergy = 0;
   }
 
-  if(not event.fX.empty()) {
+  if(not event->fX.empty()) {
     // We need to compute denoised signals.
     fWFTree.GetEntryWithIndex(ED->fRunNumber, ED->fEventNumber);
 
@@ -926,7 +859,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
 
   if(event.fR.size() == 0) {
     // We're still in the setup phase.
-    fR.assign(event.fColLength * (event.fWireModel.size()+1), 0);
+    event.fR.assign(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
       for(size_t j = 0; j < NoiseColLength; j++) {
@@ -962,7 +895,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   }
   else if(event.fV.size() == 0) {
     // At the beginning of the iteration, we just computed V = AP.
-    fV.assign(event.fColLength * (event.fWireModel.size()+1), 0);
+    event.fV.assign(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
       for(size_t j = 0; j < NoiseColLength; j++) {
@@ -980,12 +913,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
                 1, &event.fR0hat[0], event.fColumnLength, &event.fV[0], event.fColumnLength,
                 0, &event.fR0hat_V_Inv[0], event.fWireModel.size() + 1);
-    TMatrixD RootMatrix(fWireModel.size()+1, fWireModel.size()+1); // For now, avoid using LAPACK.
+    TMatrixD RootMatrix(event.fWireModel.size()+1, event.fWireModel.size()+1); // For now, avoid using LAPACK.
     for(size_t i = 0; i < event.fR0hat_V_Inv.size(); i++) {
       RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1)) = event.fR0hat_V_Inv[i];
     }
     RootMatrix.InvertFast();
-    for(size_t i = 0; i < RootMatrix.size(); i++) {
+    for(size_t i = 0; i < event.fR0hat_V_Inv.size(); i++) {
       event.fR0hat_V_Inv[i] = RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1));
     }
     // Compute R0hat_R.
@@ -1019,7 +952,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   }
   else {
     // We're in the second half of the iteration, where T was just computed.
-    std::vector<double> T(event.fColLength * (event.fWireModel.size()+1), 0);
+    std::vector<double> T(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
       for(size_t j = 0; j < NoiseColLength; j++) {
@@ -1050,7 +983,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                                        double(0));
       if(Norm > WorstNorm) WorstNorm = Norm;
     }
-    if(WorstNorm < Threshold*Threshold) return true;
+    if(WorstNorm < fRThreshold*fRThreshold) return true;
     // Compute R0hat_T.
     std::vector<double> R0hat_T((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
@@ -1068,10 +1001,10 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     T = event.fR;
     for(size_t i = 0; i < event.fP.size(); i++) event.fP[i] -= omega*event.fV[i];
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                fColumnLength, fWireModel.size() + 1, fWireModel.size() + 1,
-                1, &P[0], fColumnLength, &Beta[0], fWireModel.size() + 1,
-                1, &T[0], fColumnLength);
-    std::swap(T, P);
+                event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
+                1, &event.fP[0], event.fColumnLength, &Beta[0], event.fWireModel.size() + 1,
+                1, &T[0], event.fColumnLength);
+    std::swap(T, event.fP);
     // Clear vectors in event which are no longer needed -- this helps us keep track of where we are.
     event.fV.clear();
     event.fAlpha.clear();
@@ -1180,7 +1113,7 @@ void EXORefitSignals::DoNoiseMultiplication()
   // otherwise, the vector lengths would not match.
   // The result is placed in fNoiseMulResult.
   size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
-  assert(fNoiseMulQueue.size() == NoiseColLength * fNumVectorsInQueue;
+  assert(fNoiseMulQueue.size() == NoiseColLength * fNumVectorsInQueue);
   fNoiseMulResult.assign(fNoiseMulQueue.size(), 0); // Probably don't need to fill with 0.
 
   // Do the multiplication -- one call for every frequency.

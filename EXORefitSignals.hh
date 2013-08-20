@@ -6,19 +6,25 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <list>
 
 class EXOUWireSignal;
 class EXOTransferFunction;
 class EXOEventData;
 class EXOWaveformFT;
+class EXOTreeInputModule;
+class EXOTreeOutputModule;
 class TH3D;
 class TGraph;
+class TTree;
 
 class EXORefitSignals
 {
  public:
   // Functions specified in the order they should be called.
-  EXORefitSignals(EXOTreeOutputModule& outputModule);
+  EXORefitSignals(EXOTreeInputModule& inputModule,
+                  TTree& wfTree,
+                  EXOTreeOutputModule& outputModule);
 
   void SetNoiseFilename(std::string name) { fNoiseFilename = name; }
   void SetLightmapFilename(std::string name) { fLightmapFilename = name; }
