@@ -786,6 +786,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   if(not event->fX.empty()) {
     // We need to compute denoised signals.
     fWFTree.GetEntryWithIndex(ED->fRunNumber, ED->fEventNumber);
+    fWFEvent->GetWaveformData()->Decompress();
 
     // Collect the fourier-transformed waveforms.  Save them split into real and complex parts.
     std::vector<EXODoubleWaveform> WF_real, WF_imag;

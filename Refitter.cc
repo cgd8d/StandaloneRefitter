@@ -38,6 +38,7 @@ int main(int argc, char** argv)
 
   EXOTreeOutputModule OutputModule;
   OutputModule.SetOutputFilename(argv[3]);
+  OutputModule.Initialize();
   OutputModule.BeginOfRun(NULL); // OK, fine -- shortcut here, I assume input has only one run.
 
   int MaxEvents = 5; // Hard-code it for now.
