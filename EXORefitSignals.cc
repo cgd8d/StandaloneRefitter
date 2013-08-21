@@ -704,7 +704,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
       if(f != fMaxF) event->fX[RowIndex+1] = LeadingFactor*event->fmodel_realimag[2*(f-fMinF)+1];
     }
   }
-  // Note that I don't have good guesses for the lagrange multipliers.
+  // Defer guesses for Lagrange multipliers; we'll use AX to produce these.
 
   // Push event onto the list of event handlers.
   fEventHandlerList.push_back(event);
@@ -860,6 +860,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
 
   if(event.fR.size() == 0) {
     // We're still in the setup phase.
+    // Start by copying result into R.
     event.fR.assign(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
@@ -867,18 +868,44 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
         event.fR[i*event.fColumnLength + j] = fNoiseMulResult[IndexToGrab + j];
       }
     }
-    // Now need to finish multiplying by A, accounting for the other terms.
-    DoRestOfMultiplication(event.fX, event.fR, event);
-    // Subtract B.
+    // But wait, there's more: use this partial AX to guess lagrange multipliers.
+    std::vector<double> B(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t Index = (i+1)*event.fColumnLength; // Next column; then subtract.
       Index -= event.fWireModel.size() + 1; // Step backward.
       Index += i; // Go forward to the right entry.
-      event.fR[Index] -= 1; // All models are normalized to 1.
+      B[Index] = 1; // All models are normalized to 1.
     }
-    // Now fR = AX - B; but we want B - AX.
+    // Use B to extract the Lagrange multiplier terms of the matrix.
+    std::vector<double> Lterms(event.fColumnLength * (event.fWireModel.size()+1), 0);
+    DoRestOfMultiplication(B, Lterms, event); // A little wasteful, but that's OK for now.
+    // Transform Lterms into an approximate (now row-major) inverse to L.
+    // They're not square, so there's no perfect inverse.
+    // Also: I'm just going to do the easy thing which gets the diagonal terms of the product right.
+    // The idea here is, if A = { {M L} {C 0} } (blocks) and our initial guess is {{X}{K}},
+    // we want MX + LK = 0.  Now we've computed MX; so we can solve for a value of K
+    // which makes this smallish.
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      // I've tried making Acc the L0, L1, and L2 norm; L1 seems to work best.
+      // But, light is limiting factor here; if I improve my light estimate this may need to be revised.
+      double Acc = std::accumulate(&Lterms[i*event.fColumnLength],
+                                   &Lterms[i*event.fColumnLength+NoiseColLength],
+                                   double(0));
+      for(size_t j = i*event.fColumnLength; j < i*event.fColumnLength+NoiseColLength; j++) {
+        if(Lterms[j] != 0) Lterms[j] = double(1)/Acc;
+      }
+    }
+    // Add an approximation of the lagrange terms to X; then we can finish multiplying R <-- AX.
+    // The terms being modified would not interact with the noise anyway, so it's OK.
+    cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
+                event.fWireModel.size()+1, event.fWireModel.size()+1, NoiseColLength,
+                1, &Lterms[0], event.fColumnLength, &event.fR[0], event.fColumnLength,
+                0, &event.fX[NoiseColLength], event.fColumnLength);
+    // Now need to finish multiplying by A, accounting for the other terms.
+    DoRestOfMultiplication(event.fX, event.fR, event);
+    // Now, R <-- B - R = B - AX.
     for(size_t i = 0; i < event.fR.size(); i++) {
-      event.fR[i] = -event.fR[i];
+      event.fR[i] = B[i] - event.fR[i];
     }
     // Set up other pieces of the handler.
     event.fP = event.fR;
