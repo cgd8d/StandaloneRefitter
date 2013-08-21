@@ -43,6 +43,7 @@ int main(int argc, char** argv)
 
   int MaxEvents = 5; // Hard-code it for now.
   EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
+  RefitSig.SetNoiseFilename("/global/u1/c/claytond/TestEXOAnalysisBuild/noise_manyruns_withuwires_10000.root");
   RefitSig.Initialize();
 
   for(Long64_t entryNum = 0; entryNum < MaxEvents; entryNum++) {
