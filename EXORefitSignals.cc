@@ -276,14 +276,19 @@ int EXORefitSignals::Initialize()
   fWireInduction /= MaxVal;
 
   // Initialize stopwatches too.
+  fWatch_BiCGSTAB.Reset();
   fWatch_NoiseMul.Reset();
   fWatch_RestMul.Reset();
+  fNumEventsHandled = 0;
   return 0;
 }
 
 EXORefitSignals::~EXORefitSignals()
 {
   // Print statistics and timing information.
+  std::cout<<fNumEventsHandled<<" events were handled by signal refitting."<<std::endl;
+  std::cout<<"Total time spent in BiCGSTAB iterations:"<<std::endl;
+  fWatch_BiCGSTAB.Print();
   std::cout<<"Multiplying by noise blocks:"<<std::endl;
   fWatch_NoiseMul.Print();
   std::cout<<"Multiplying by the rest of the matrix entries:"<<std::endl;
@@ -719,6 +724,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     }
   }
   fNumVectorsInQueue += event->fWireModel.size() + 1;
+  fNumEventsHandled++; // One more event that will be actually handled.
 
   // Now, while there are enough requests in the queue, satisfy those requests.
   while(fNumVectorsInQueue > 300) {
@@ -856,6 +862,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   // Electronic Transactions on Numerical Analysis, vol 16, 129-142 (2003).
   // "A BLOCK VERSION OF BICGSTAB FOR LINEAR SYSTEMS WITH MULTIPLE RIGHT-HAND SIDES"
   // A. EL GUENNOUNI, K. JBILOU, AND H. SADOK.
+  fWatch_BiCGSTAB.Start(false);
   size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
 
   if(event.fR.size() == 0) {
@@ -919,6 +926,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
+    fWatch_BiCGSTAB.Stop();
     return false;
   }
   else if(event.fV.size() == 0) {
@@ -976,6 +984,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
+    fWatch_BiCGSTAB.Stop();
     return false;
   }
   else {
@@ -1011,7 +1020,10 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                                        double(0));
       if(Norm > WorstNorm) WorstNorm = Norm;
     }
-    if(WorstNorm < fRThreshold*fRThreshold) return true;
+    if(WorstNorm < fRThreshold*fRThreshold) {
+      fWatch_BiCGSTAB.Stop();
+      return true;
+    }
     // Compute R0hat_T.
     std::vector<double> R0hat_T((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
@@ -1046,6 +1058,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
+    fWatch_BiCGSTAB.Stop();
     return false;
   }
 }
