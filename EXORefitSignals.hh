@@ -104,6 +104,7 @@ class EXORefitSignals
   TStopwatch fWatch_NoiseMul;
   TStopwatch fWatch_RestMul;
   size_t fNumEventsHandled;
+  size_t fNumSignalsHandled;
 
   const double fThoriumEnergy_keV;
   const size_t fMinF;

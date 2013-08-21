@@ -280,6 +280,7 @@ int EXORefitSignals::Initialize()
   fWatch_NoiseMul.Reset();
   fWatch_RestMul.Reset();
   fNumEventsHandled = 0;
+  fNumSignalsHandled = 0;
   return 0;
 }
 
@@ -287,6 +288,7 @@ EXORefitSignals::~EXORefitSignals()
 {
   // Print statistics and timing information.
   std::cout<<fNumEventsHandled<<" events were handled by signal refitting."<<std::endl;
+  std::cout<<"Those events contained a total of "<<fNumSignalsHandled<<" signals to refit."<<std::endl;
   std::cout<<"Total time spent in BiCGSTAB iterations:"<<std::endl;
   fWatch_BiCGSTAB.Print();
   std::cout<<"Multiplying by noise blocks:"<<std::endl;
@@ -725,6 +727,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   }
   fNumVectorsInQueue += event->fWireModel.size() + 1;
   fNumEventsHandled++; // One more event that will be actually handled.
+  fNumSignalsHandled += event->fWireModel.size() + 1;
 
   // Now, while there are enough requests in the queue, satisfy those requests.
   while(fNumVectorsInQueue > 300) {
