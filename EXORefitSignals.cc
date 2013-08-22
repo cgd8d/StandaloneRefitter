@@ -284,6 +284,8 @@ int EXORefitSignals::Initialize()
   fNumEventsHandled = 0;
   fNumSignalsHandled = 0;
   fTotalIterationsDone = 0;
+  fInitialNormWires = 0;
+  fInitialNormAPDs = 0;
   return 0;
 }
 
@@ -293,6 +295,8 @@ EXORefitSignals::~EXORefitSignals()
   std::cout<<fNumEventsHandled<<" events were handled by signal refitting."<<std::endl;
   std::cout<<"Those events contained a total of "<<fNumSignalsHandled<<" signals to refit."<<std::endl;
   std::cout<<fTotalIterationsDone<<" iterations were required."<<std::endl;
+  std::cout<<"Average norm of initial APD guess is "<<fInitialNormAPDs/fNumEventsHandled<<std::endl;
+  std::cout<<"Average norm of initial wire guess is "<<fInitialNormWires/fNumEventsHandled<<std::endl;
   std::cout<<"Multiplying by noise blocks:"<<std::endl;
   fWatch_NoiseMul.Print();
   std::cout<<"Total time spent in BiCGSTAB iterations (excluding noise blocks):"<<std::endl;
@@ -924,6 +928,15 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Now, R <-- B - R = B - AX.
     for(size_t i = 0; i < event.fR.size(); i++) {
       event.fR[i] = B[i] - event.fR[i];
+    }
+    // Diagnostics: see what kind of norm we're starting with.
+    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
+      double Norm = std::inner_product(&event.fR[i*event.fColumnLength],
+                                       &event.fR[(i+1)*event.fColumnLength],
+                                       &event.fR[i*event.fColumnLength],
+                                       double(0));
+      if(i == event.fWireModel.size()) fInitialNormAPDs += Norm;
+      else fInitialNormWires += Norm/event.fWireModel.size();
     }
     // Set up other pieces of the handler.
     event.fP = event.fR;
