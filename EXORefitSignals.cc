@@ -674,20 +674,18 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
       if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
     }
 
-    double Normalization = std::inner_product(model.begin(), model.end(), model.begin(), double(0));
-    double SumSqNoise = 0;
+    double Normalization = 0;
     for(size_t f = fMinF; f <= fMaxF; f++) {
       size_t step = (f < fMaxF ? 2 : 1);
       size_t ColIndex = step*step*fChannels.size()*channel_index;
       double RNoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index];
-      SumSqNoise += 1./(RNoiseVal*RNoiseVal);
+      Normalization += model[2*(f-fMinF)]*model[2*(f-fMinF)]/(RNoiseVal*RNoiseVal);
       if(step == 2) {
         ColIndex += step*fChannels.size();
         double INoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index + 1];
-        SumSqNoise += 1./(INoiseVal*INoiseVal);
+        Normalization += model[2*(f-fMinF)+1]*model[2*(f-fMinF)+1]/(INoiseVal*INoiseVal);
       }
     }
-    Normalization *= SumSqNoise;
     for(size_t f = fMinF; f <= fMaxF; f++) {
       size_t step = (f < fMaxF ? 2 : 1);
       size_t RowIndex = ColIndex + 2*fChannels.size()*(f-fMinF);
@@ -1163,11 +1161,11 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
       size_t Index1 = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
       size_t Index2 = event.fColumnLength - 1;
       for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-        out[Index2] += event.fmodel_realimag[2*f]*in[Index1];
-        out[Index1] += event.fmodel_realimag[2*f]*in[Index2];
+        out[Index2] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*in[Index1];
+        out[Index1] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*in[Index2];
         if(f < fMaxF-fMinF) {
-          out[Index2] += event.fmodel_realimag[2*f+1]*in[Index1+1];
-          out[Index1+1] += event.fmodel_realimag[2*f+1]*in[Index2];
+          out[Index2] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*in[Index1+1];
+          out[Index1+1] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*in[Index2];
         }
         Index1 += event.fColumnLength;
         Index2 += event.fColumnLength;
