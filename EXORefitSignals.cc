@@ -279,8 +279,11 @@ int EXORefitSignals::Initialize()
   fWatch_BiCGSTAB.Reset();
   fWatch_NoiseMul.Reset();
   fWatch_RestMul.Reset();
+  fWatch_BiCGSTAB_part1.Reset();
+  fWatch_BiCGSTAB_part2.Reset();
   fNumEventsHandled = 0;
   fNumSignalsHandled = 0;
+  fTotalIterationsDone = 0;
   return 0;
 }
 
@@ -289,12 +292,17 @@ EXORefitSignals::~EXORefitSignals()
   // Print statistics and timing information.
   std::cout<<fNumEventsHandled<<" events were handled by signal refitting."<<std::endl;
   std::cout<<"Those events contained a total of "<<fNumSignalsHandled<<" signals to refit."<<std::endl;
-  std::cout<<"Total time spent in BiCGSTAB iterations:"<<std::endl;
-  fWatch_BiCGSTAB.Print();
+  std::cout<<fTotalIterationsDone<<" iterations were required."<<std::endl;
   std::cout<<"Multiplying by noise blocks:"<<std::endl;
   fWatch_NoiseMul.Print();
+  std::cout<<"Total time spent in BiCGSTAB iterations (excluding noise blocks):"<<std::endl;
+  fWatch_BiCGSTAB.Print();
   std::cout<<"Multiplying by the rest of the matrix entries:"<<std::endl;
   fWatch_RestMul.Print();
+  std::cout<<"Part one of iterations (exploiting V = AP):"<<std::endl;
+  fWatch_BiCGSTAB_part1.Print();
+  std::cout<<"Part two of iterations (exploiting T = AS):"<<std::endl;
+  fWatch_BiCGSTAB_part2.Print();
 }
 
 EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
@@ -934,6 +942,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   }
   else if(event.fV.size() == 0) {
     // At the beginning of the iteration, we just computed V = AP.
+    fTotalIterationsDone++;
+    fWatch_BiCGSTAB_part1.Start(false);
     event.fV.assign(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
@@ -987,11 +997,13 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
+    fWatch_BiCGSTAB_part1.Stop();
     fWatch_BiCGSTAB.Stop();
     return false;
   }
   else {
     // We're in the second half of the iteration, where T was just computed.
+    fWatch_BiCGSTAB_part2.Start(false);
     std::vector<double> T(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
@@ -1024,6 +1036,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       if(Norm > WorstNorm) WorstNorm = Norm;
     }
     if(WorstNorm < fRThreshold*fRThreshold) {
+      fWatch_BiCGSTAB_part2.Stop();
       fWatch_BiCGSTAB.Stop();
       return true;
     }
@@ -1061,6 +1074,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
+    fWatch_BiCGSTAB_part2.Stop();
     fWatch_BiCGSTAB.Stop();
     return false;
   }

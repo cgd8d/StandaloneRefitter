@@ -101,10 +101,13 @@ class EXORefitSignals
 
   // Various stopwatches, to understand the fraction of time spent actually solving the matrix.
   TStopwatch fWatch_BiCGSTAB;
+  TStopwatch fWatch_BiCGSTAB_part1;
+  TStopwatch fWatch_BiCGSTAB_part2;
   TStopwatch fWatch_NoiseMul;
   TStopwatch fWatch_RestMul;
   size_t fNumEventsHandled;
   size_t fNumSignalsHandled;
+  size_t fTotalIterationsDone;
 
   const double fThoriumEnergy_keV;
   const size_t fMinF;
