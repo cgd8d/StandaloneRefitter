@@ -679,11 +679,11 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
       size_t step = (f < fMaxF ? 2 : 1);
       size_t ColIndex = step*step*fChannels.size()*channel_index;
       double RNoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index];
-      Normalization += model[2*(f-fMinF)]*model[2*(f-fMinF)]/(RNoiseVal*RNoiseVal);
+      Normalization += model[2*(f-fMinF)]*model[2*(f-fMinF)]/RNoiseVal;
       if(step == 2) {
         ColIndex += step*fChannels.size();
         double INoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index + 1];
-        Normalization += model[2*(f-fMinF)+1]*model[2*(f-fMinF)+1]/(INoiseVal*INoiseVal);
+        Normalization += model[2*(f-fMinF)+1]*model[2*(f-fMinF)+1]/INoiseVal;
       }
     }
     for(size_t f = fMinF; f <= fMaxF; f++) {
@@ -693,11 +693,11 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
       size_t NoiseColIndex = step*step*fChannels.size()*channel_index;
 
       double RNoise = fNoiseCorrelations[f-fMinF][NoiseColIndex + step*channel_index];
-      event->fX[RowIndex] = model[2*(f-fMinF)]/(RNoise*RNoise*Normalization);
+      event->fX[RowIndex] = model[2*(f-fMinF)]/(RNoise*Normalization);
       if(f != fMaxF) {
         NoiseColIndex += step*fChannels.size();
         double INoise = fNoiseCorrelations[f-fMinF][NoiseColIndex + step*channel_index + 1];
-        event->fX[RowIndex+1] = model[2*(f-fMinF) + 1]/(INoise*INoise*Normalization);
+        event->fX[RowIndex+1] = model[2*(f-fMinF) + 1]/(INoise*Normalization);
       }
     }
   }
@@ -906,20 +906,21 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // we want MX + LK = 0.  Now we've computed MX; so we can solve for a value of K
     // which makes this smallish.
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      // I've tried making Acc the L0, L1, and L2 norm; L1 seems to work best.
-      // But, light is limiting factor here; if I improve my light estimate this may need to be revised.
-      double Acc = std::accumulate(&Lterms[i*event.fColumnLength],
-                                   &Lterms[i*event.fColumnLength+NoiseColLength],
-                                   double(0));
+      // I've tried making Acc the L0, L1, and L2 norm; L2 seems to be the clear winner.
+      // But, there's definitely room for improvement in the initial guess still, including this!
+      double Acc = std::inner_product(&Lterms[i*event.fColumnLength],
+                                      &Lterms[i*event.fColumnLength+NoiseColLength],
+                                      &Lterms[i*event.fColumnLength],
+                                      double(0));
       for(size_t j = i*event.fColumnLength; j < i*event.fColumnLength+NoiseColLength; j++) {
-        if(Lterms[j] != 0) Lterms[j] = double(1)/Acc;
+        if(Lterms[j] != 0) Lterms[j] /= Acc;
       }
     }
     // Add an approximation of the lagrange terms to X; then we can finish multiplying R <-- AX.
     // The terms being modified would not interact with the noise anyway, so it's OK.
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fWireModel.size()+1, event.fWireModel.size()+1, NoiseColLength,
-                1, &Lterms[0], event.fColumnLength, &event.fR[0], event.fColumnLength,
+                -1, &Lterms[0], event.fColumnLength, &event.fR[0], event.fColumnLength,
                 0, &event.fX[NoiseColLength], event.fColumnLength);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fX, event.fR, event);
