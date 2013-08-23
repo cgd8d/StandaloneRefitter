@@ -666,38 +666,50 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // Start with the wires.
   for(size_t i = 0; i < event->fWireModel.size(); i++) {
     size_t ColIndex = i*event->fColumnLength;
-    Int_t channel = ED->GetUWireSignal(event->fWireModel[i].first)->fChannel;
-    std::vector<double>& model = event->fWireModel[i].second[channel];
-    size_t channel_index = 0;
-    while(fChannels[channel_index] != channel) {
-      channel_index++;
-      if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
-    }
-
     double Normalization = 0;
-    for(size_t f = fMinF; f <= fMaxF; f++) {
-      size_t step = (f < fMaxF ? 2 : 1);
-      size_t ColIndex = step*step*fChannels.size()*channel_index;
-      double RNoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index];
-      Normalization += model[2*(f-fMinF)]*model[2*(f-fMinF)]/RNoiseVal;
-      if(step == 2) {
-        ColIndex += step*fChannels.size();
-        double INoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index + 1];
-        Normalization += model[2*(f-fMinF)+1]*model[2*(f-fMinF)+1]/INoiseVal;
+    for(std::map<unsigned char, std::vector<double> >::iterator it = event->fWireModel[i].second.begin();
+        it != event->fWireModel[i].second.end();
+        it++) {
+      std::vector<double>& model = it->second;
+      size_t channel_index = 0;
+      while(fChannels[channel_index] != channel) {
+        channel_index++;
+        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
       }
-    }
-    for(size_t f = fMinF; f <= fMaxF; f++) {
-      size_t step = (f < fMaxF ? 2 : 1);
-      size_t RowIndex = ColIndex + 2*fChannels.size()*(f-fMinF);
-      RowIndex += channel_index*step;
-      size_t NoiseColIndex = step*step*fChannels.size()*channel_index;
+      for(size_t f = fMinF; f <= fMaxF; f++) {
+        size_t step = (f < fMaxF ? 2 : 1);
+        size_t ColIndex = step*step*fChannels.size()*channel_index;
+        double RNoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index];
+        Normalization += model[2*(f-fMinF)]*model[2*(f-fMinF)]/RNoiseVal;
+        if(step == 2) {
+          ColIndex += step*fChannels.size();
+          double INoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index + 1];
+          Normalization += model[2*(f-fMinF)+1]*model[2*(f-fMinF)+1]/INoiseVal;
+        }
+      }
+    } // Have overall normalization for this signal.
+    for(std::map<unsigned char, std::vector<double> >::iterator it = event->fWireModel[i].second.begin();
+        it != event->fWireModel[i].second.end();
+        it++) {
+      std::vector<double>& model = it->second;
+      size_t channel_index = 0;
+      while(fChannels[channel_index] != channel) {
+        channel_index++;
+        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
+      }
+      for(size_t f = fMinF; f <= fMaxF; f++) {
+        size_t step = (f < fMaxF ? 2 : 1);
+        size_t RowIndex = ColIndex + 2*fChannels.size()*(f-fMinF);
+        RowIndex += channel_index*step;
+        size_t NoiseColIndex = step*step*fChannels.size()*channel_index;
 
-      double RNoise = fNoiseCorrelations[f-fMinF][NoiseColIndex + step*channel_index];
-      event->fX[RowIndex] = model[2*(f-fMinF)]/(RNoise*Normalization);
-      if(f != fMaxF) {
-        NoiseColIndex += step*fChannels.size();
-        double INoise = fNoiseCorrelations[f-fMinF][NoiseColIndex + step*channel_index + 1];
-        event->fX[RowIndex+1] = model[2*(f-fMinF) + 1]/(INoise*Normalization);
+        double RNoise = fNoiseCorrelations[f-fMinF][NoiseColIndex + step*channel_index];
+        event->fX[RowIndex] = model[2*(f-fMinF)]/(RNoise*Normalization);
+        if(f != fMaxF) {
+          NoiseColIndex += step*fChannels.size();
+          double INoise = fNoiseCorrelations[f-fMinF][NoiseColIndex + step*channel_index + 1];
+          event->fX[RowIndex+1] = model[2*(f-fMinF) + 1]/(INoise*Normalization);
+        }
       }
     }
   }
