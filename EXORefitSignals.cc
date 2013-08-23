@@ -672,7 +672,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
         it++) {
       std::vector<double>& model = it->second;
       size_t channel_index = 0;
-      while(fChannels[channel_index] != channel) {
+      while(fChannels[channel_index] != it->first) {
         channel_index++;
         if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
       }
@@ -693,7 +693,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
         it++) {
       std::vector<double>& model = it->second;
       size_t channel_index = 0;
-      while(fChannels[channel_index] != channel) {
+      while(fChannels[channel_index] != it->first) {
         channel_index++;
         if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
       }
