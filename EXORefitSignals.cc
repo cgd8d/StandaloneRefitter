@@ -899,28 +899,36 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Use B to extract the Lagrange multiplier terms of the matrix.
     std::vector<double> Lterms(event.fColumnLength * (event.fWireModel.size()+1), 0);
     DoRestOfMultiplication(B, Lterms, event); // A little wasteful, but that's OK for now.
-    // Transform Lterms into an approximate (now row-major) inverse to L.
-    // They're not square, so there's no perfect inverse.
-    // Also: I'm just going to do the easy thing which gets the diagonal terms of the product right.
+    // Solve for a left-inverse of L.
     // The idea here is, if A = { {M L} {C 0} } (blocks) and our initial guess is {{X}{K}},
-    // we want MX + LK = 0.  Now we've computed MX; so we can solve for a value of K
+    // we want MX + LK ~ 0.  Now we've computed MX; so we can solve for a value of K
     // which makes this smallish.
-    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      // I've tried making Acc the L0, L1, and L2 norm; L2 seems to be the clear winner.
-      // But, there's definitely room for improvement in the initial guess still, including this!
-      double Acc = std::inner_product(&Lterms[i*event.fColumnLength],
-                                      &Lterms[i*event.fColumnLength+NoiseColLength],
-                                      &Lterms[i*event.fColumnLength],
-                                      double(0));
-      for(size_t j = i*event.fColumnLength; j < i*event.fColumnLength+NoiseColLength; j++) {
-        if(Lterms[j] != 0) Lterms[j] /= Acc;
-      }
-    }
-    // Add an approximation of the lagrange terms to X; then we can finish multiplying R <-- AX.
-    // The terms being modified would not interact with the noise anyway, so it's OK.
+    // First, compute L_trans L.
+    std::vector<double> Ltrans_L((event.fWireModel.size()+1)*(event.fWireModel.size()+1),0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fWireModel.size()+1, event.fWireModel.size()+1, NoiseColLength,
-                -1, &Lterms[0], event.fColumnLength, &event.fR[0], event.fColumnLength,
+                1, &Lterms[0], event.fColumnLength, &Lterms[0], event.fColumnLength,
+                0, &Ltrans_L[0], event.fWireModel.size()+1);
+    // Now find the inverse of Ltrans_L, and put it back into Ltrans_L.
+    TMatrixD RootMatrix(event.fWireModel.size()+1, event.fWireModel.size()+1); // For now, avoid using LAPACK.
+    for(size_t i = 0; i < Ltrans_L.size(); i++) {
+      RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1)) = Ltrans_L[i];
+    }
+    RootMatrix.InvertFast();
+    for(size_t i = 0; i < Ltrans_L.size(); i++) {
+      Ltrans_L[i] = RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1));
+    }
+    // Multiply on the right by transpose-L; put the left inverse of L in LInv.
+    std::vector<double> LInv(event.fColumnLength * (event.fWireModel.size()+1), 0);
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans,
+                event.fWireModel.size()+1, event.fColumnLength, event.fWireModel.size()+1,
+                1, &Ltrans_L[0], event.fWireModel.size()+1, &Lterms[0], event.fColumnLength,
+                0, &LInv[0], event.fWireModel.size()+1);
+    // Add an approximation of the lagrange terms to X; then we can finish multiplying R <-- AX.
+    // The terms being modified would not interact with the noise anyway, so it's OK.
+    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                event.fWireModel.size()+1, event.fWireModel.size()+1, NoiseColLength,
+                -1, &LInv[0], event.fWireModel.size()+1, &event.fR[0], event.fColumnLength,
                 0, &event.fX[NoiseColLength], event.fColumnLength);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fX, event.fR, event);
