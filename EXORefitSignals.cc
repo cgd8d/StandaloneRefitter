@@ -954,6 +954,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                                        &event.fR[(i+1)*event.fColumnLength],
                                        &event.fR[i*event.fColumnLength],
                                        double(0));
+      std::cout<<"Initial norm for channel "<<i<<" is "<<Norm<<std::endl;
       if(i == event.fWireModel.size()) fInitialNormAPDs += Norm;
       else fInitialNormWires += Norm/event.fWireModel.size();
     }
@@ -1065,6 +1066,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                                        event.fR.begin() + NextCol,
                                        event.fR.begin() + ColIndex,
                                        double(0));
+      std::cout<<"Norm for signal "<<col<<" is "<<Norm<<std::endl;
       if(Norm > WorstNorm) WorstNorm = Norm;
     }
     if(WorstNorm < fRThreshold*fRThreshold) {
