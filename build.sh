@@ -3,10 +3,11 @@
 # I test explicitly for preprocessor macros which are needed.
 
 # For local builds without BLAS, just to get things working.
-g++ -g -O2 \
+g++ -g -O3 \
 -I`exo-config --incdir` `root-config --cflags` \
 $(if [[ "$(exo-config --incflags)" == *HAVE_TYPE_TRAITS=1* ]]; then echo "-DHAVE_TYPE_TRAITS=1"; fi) \
 `exo-config --libflags` `root-config --libs` \
+-DHAVE_BLAS $MKL_LP64 -Wl,-rpath,$MKL_LIBDIR \
 -o Refitter \
 *.cc
 
