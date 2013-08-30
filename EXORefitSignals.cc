@@ -901,6 +901,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     // But wait, there's more: use this partial AX to guess lagrange multipliers.
+    std::vector<double> Y = event.fR;
+    DoRestOfMultiplication(event.fX, Y, event); // To make sure we factor in poisson terms.
     std::vector<double> B(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t Index = (i+1)*event.fColumnLength; // Next column; then subtract.
@@ -940,7 +942,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // The terms being modified would not interact with the noise anyway, so it's OK.
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fWireModel.size()+1, event.fWireModel.size()+1, NoiseColLength,
-                -1, &LInv[0], event.fWireModel.size()+1, &event.fR[0], event.fColumnLength,
+                -1, &LInv[0], event.fWireModel.size()+1, &Y[0], event.fColumnLength,
                 0, &event.fX[NoiseColLength], event.fColumnLength);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fX, event.fR, event);
