@@ -7,3 +7,25 @@ This actually can also alleviate some of the pressure on me to re-implement clus
 Note that the whole matrix A is not identical event-by-event -- just the noise portions.  So, some care will need to be taken.  Additionally, I'll want to support events converging at different times.
 
 Basic plan:  the class should have two matrices (column-major), one of which is designated the queue for vectors needing to be multiplied.  Each event needs to track where it put its own vectors in the matrix.  When it's time, matrix multiplication gets called, and results are put into a result matrix.  The queue matrix is cleared, ready to accept new requests.
+
+
+
+Current work:  I've now got a basic preconditioner which is giving convergence on a small sample, for wire+apd.  This is big progress.  Next things which need to happen (not all sequential):
+
+* Improve code quality.
+* Updated profiling information.
+* Add options to do eg. APDs-only.
+
+* Identify better preconditioners -- currently when I refit the first 20 events, it does not converge.
+* Identify better preconditioners -- looking for faster convergence, using the unpreconditioned R to determine convergence.
+* Process a small batch of data through with wire+apd, and ensure the results are physically reasonable.
+* For one given run, compare rotated resolutions with denoising wire+apd, uncorrelated wire+apd, and just apd.  If any use of wires is beneficial, also use these processings to understand whether the denoising of wires is actually meaningful vs their use in denoising apds.
+* Based on usefulness of refitting wires, modify EXOAnalysis and EXOFitter appropriately.
+* Understand necessary threshold.  (Try to figure out whether it's right to apply threshold to preconditioned or unpreconditioned R, for physical consistency.)
+* Do profiling of bottlenecks outside of gemm.
+* Do profiling of SLAC rhel5-32, rhel5-64, rhel6-32, rhel6-64, NERSC sequential*8, NERSC multithreaded.
+* Do profiling while varying number of columns (possibly trying to match sizes of noise matrices.
+* Improve noise matrix by exploiting symmetries.  (Are there any in DFT domain?)
+
+* At this stage, I should consult with Tony to understand the tradeoffs in SLAC CPU limits vs NERSC bandwidth limits.
+* And once that's decided, 
