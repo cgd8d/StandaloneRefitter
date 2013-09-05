@@ -815,6 +815,9 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   }
 
   if(not event->fX.empty()) {
+    // Undo preconditioning of X.
+    event->DoInvRPrecon(event->fX);
+
     // We need to compute denoised signals.
     fWFTree.GetEntryWithIndex(ED->fRunNumber, ED->fEventNumber);
     fWFEvent->GetWaveformData()->Decompress();
@@ -950,6 +953,17 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     for(size_t i = 0; i < event.fR.size(); i++) {
       event.fR[i] = B[i] - event.fR[i];
     }
+    // Create preconditioner vectors.  For now, we just do something simple (but still fairly effective).
+    event.fRPrecon.assign(event.fColumnLength, 1);
+    event.fLPrecon.assign(event.fColumnLength, 1);
+    for(size_t i = NoiseColLength; i < event.fColumnLength-1; i++) {
+      // Apply to wire constraint rows and wire lagrange multiplier columns only.
+      event.fRPrecon[i] = 1000;
+      event.fLPrecon[i] = 1000;
+    }
+    // Now precondition R and X0 appropriately.
+    event.DoRPrecon(event.fX);
+    event.DoInvLPrecon(event.fR);
     // Diagnostics: see what kind of norm we're starting with.
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       double Norm = std::inner_product(&event.fR[i*event.fColumnLength],
@@ -963,12 +977,15 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Set up other pieces of the handler.
     event.fP = event.fR;
     event.fR0hat = event.fR;
+    // We'll take K1_inv A K2_inv P, so compute K2_inv P.
+    event.fprecon_tmp = event.fP;
+    event.DoInvRPrecon(event.fprecon_tmp);
     // Now we want V <- AP, so request a multiplication by P.
     event.fResultIndex = fNoiseMulQueue.size();
     fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       for(size_t j = 0; j < NoiseColLength; j++) {
-        fNoiseMulQueue.push_back(event.fP[i*event.fColumnLength + j]);
+        fNoiseMulQueue.push_back(event.fprecon_tmp[i*event.fColumnLength + j]);
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
@@ -987,7 +1004,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     // Now need to finish multiplying by A, accounting for the other terms.
-    DoRestOfMultiplication(event.fP, event.fV, event);
+    DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
+    event.DoInvLPrecon(event.fV);
     // Compute fR0hat_V_Inv.
     // (Taking the actual inverse is probably not the most efficient approach,
     //  but it's the easiest and this is a small matrix.
@@ -1024,11 +1042,14 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 -1, &event.fV[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
                 1, &event.fR[0], event.fColumnLength);
     // Now we desire T = AR (AS in paper).  Request a matrix multiplication, and return.
+    // Remember to apply preconditioner here too.
+    event.fprecon_tmp = event.fR;
+    event.DoInvRPrecon(event.fprecon_tmp);
     event.fResultIndex = fNoiseMulQueue.size();
     fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       for(size_t j = 0; j < NoiseColLength; j++) {
-        fNoiseMulQueue.push_back(event.fR[i*event.fColumnLength + j]);
+        fNoiseMulQueue.push_back(event.fprecon_tmp[i*event.fColumnLength + j]);
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
@@ -1047,7 +1068,9 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       }
     }
     // Now need to finish multiplying by A, accounting for the other terms.
-    DoRestOfMultiplication(event.fR, T, event);
+    DoRestOfMultiplication(event.fprecon_tmp, T, event);
+    // Finish preconditioner.
+    event.DoInvLPrecon(T);
     // Compute omega.
     double omega = std::inner_product(T.begin(), T.end(), event.fR.begin(), double(0)) /
                    std::inner_product(T.begin(), T.end(), T.begin(), double(0));
@@ -1101,12 +1124,14 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     event.fV.clear();
     event.fAlpha.clear();
     event.fR0hat_V_Inv.clear();
-    // And request AP.
+    // And request AP.  Remember preconditioner.
+    event.fprecon_tmp = event.fP;
+    event.DoInvRPrecon(event.fprecon_tmp);
     event.fResultIndex = fNoiseMulQueue.size();
     fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       for(size_t j = 0; j < NoiseColLength; j++) {
-        fNoiseMulQueue.push_back(event.fP[i*event.fColumnLength + j]);
+        fNoiseMulQueue.push_back(event.fprecon_tmp[i*event.fColumnLength + j]);
       }
     }
     fNumVectorsInQueue += event.fWireModel.size() + 1;
@@ -1225,4 +1250,22 @@ void EXORefitSignals::DoNoiseMultiplication()
   // Clean up, to be ready for the next call.
   fNoiseMulQueue.clear(); // Hopefully doesn't free memory, since I'll need it again.
   fNumVectorsInQueue = 0;
+}
+
+void EXORefitSignals::EventHandler::DoInvLPrecon(std::vector<double>& in)
+{
+  // Multiply by K1_inv.
+  for(size_t i = 0; i < in.size(); i++) in[i] *= fLPrecon[i % fColumnLength];
+}
+
+void EXORefitSignals::EventHandler::DoInvRPrecon(std::vector<double>& in)
+{
+  // Multiply by K2_inv.
+  for(size_t i = 0; i < in.size(); i++) in[i] *= fRPrecon[i % fColumnLength];
+}
+
+void EXORefitSignals::EventHandler::DoRPrecon(std::vector<double>& in)
+{
+  // Multiply by K2; used to find the preconditioned initial guess.
+  for(size_t i = 0; i < in.size(); i++) in[i] /= fRPrecon[i % fColumnLength];
 }

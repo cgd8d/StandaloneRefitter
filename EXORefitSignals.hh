@@ -75,6 +75,14 @@ class EXORefitSignals
     std::vector<double> fV; // only needed within an iteration.
     std::vector<double> fAlpha; // only needed within an iteration.
     std::vector<double> fR0hat_V_Inv; // only needed within an iteration; not strictly needed, but convenient.
+    std::vector<double> fprecon_tmp; // For storing the right-preconditioned version of a vector.
+
+    // Preconditioner stuff.
+    std::vector<double> fLPrecon; // K1_inv
+    std::vector<double> fRPrecon; // K2_inv
+    void DoInvLPrecon(std::vector<double>& in);
+    void DoInvRPrecon(std::vector<double>& in);
+    void DoRPrecon(std::vector<double>& in);
 
     // Where in the result matrix can we expect to find the required result?
     size_t fResultIndex;
