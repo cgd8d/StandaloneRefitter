@@ -19,7 +19,28 @@ Current work:  I've now got a basic preconditioner which is giving convergence o
 * Identify better preconditioners -- currently when I refit the first 20 events, it does not converge.
 * Identify better preconditioners -- looking for faster convergence, using the unpreconditioned R to determine convergence.
 * Process a small batch of data through with wire+apd, and ensure the results are physically reasonable.
-* For one given run, compare rotated resolutions with denoising wire+apd, uncorrelated wire+apd, and just apd.  If any use of wires is beneficial, also use these processings to understand whether the denoising of wires is actually meaningful vs their use in denoising apds.
+* Compare rotated energies with this full algorithm vs various scale-backs I could do.
+
+	The algorithms can be denoted by a box, where some plausible options are:
+
+			Using APDs	Using Wires
+	Denoise APDs	XXXXXXXXXX	XXXXXXXXXXX
+	Denoise Wires	XXXXXXXXXX	XXXXXXXXXXX
+
+			Using APDs	Using Wires
+	Denoise APDs	XXXXXXXXXX
+	Denoise Wires			XXXXXXXXXXX
+
+			Using APDs	Using Wires
+	Denoise APDs	XXXXXXXXXX	XXXXXXXXXXX
+	Denoise Wires
+
+			Using APDs	Using Wires
+	Denoise APDs	XXXXXXXXXX
+	Denoise Wires
+
+	Each box filled in should give a strictly better result; the question is which boxes are negligible.
+
 * Based on usefulness of refitting wires, modify EXOAnalysis and EXOFitter appropriately.
 * Understand necessary threshold.  (Try to figure out whether it's right to apply threshold to preconditioned or unpreconditioned R, for physical consistency.)
 * Do profiling of bottlenecks outside of gemm.
