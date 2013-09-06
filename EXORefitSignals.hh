@@ -139,10 +139,17 @@ class EXORefitSignals
   bool DoBlBiCGSTAB(EventHandler& event);
 
   // Functions to multiply by the noise matrix.
+  size_t fNoiseColumnLength;
   std::vector<double> fNoiseMulQueue;
   std::vector<double> fNoiseMulResult;
   size_t fNumVectorsInQueue;
   void DoNoiseMultiplication();
+  size_t RequestNoiseMul(std::vector<double>& vec,
+                         size_t ColLength);
+  void FillFromNoise(std::vector<double>& vec,
+                     size_t NumCols,
+                     size_t ColLength,
+                     size_t ResultIndex);
 
   // Function to perform the rest of matrix multiplication.
   void DoRestOfMultiplication(const std::vector<double>& in,

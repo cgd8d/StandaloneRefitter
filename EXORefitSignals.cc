@@ -201,13 +201,14 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // Cleanup -- this should do it.
   delete NoiseFile;
 
-  // For convenience, pre-store the index where APDs start in fChannels.
+  // For convenience, pre-store useful parameters.
   for(size_t i = 0; i < fChannels.size(); i++) {
     if(EXOMiscUtil::TypeOfChannel(fChannels[i]) == EXOMiscUtil::kAPDGang) {
       fFirstAPDChannelIndex = i;
       break;
     }
   }
+  fNoiseColumnLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
 }
 
 int EXORefitSignals::Initialize()
@@ -739,15 +740,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   fEventHandlerList.push_back(event);
 
   // Request a matrix multiplication of X.
-  event->fResultIndex = fNoiseMulQueue.size();
-  size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
-  fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event->fWireModel.size()+1));
-  for(size_t i = 0; i <= event->fWireModel.size(); i++) {
-    for(size_t j = 0; j < NoiseColLength; j++) {
-      fNoiseMulQueue.push_back(event->fX[i*event->fColumnLength + j]);
-    }
-  }
-  fNumVectorsInQueue += event->fWireModel.size() + 1;
+  event->fResultIndex = RequestNoiseMul(event->fX, event->fColumnLength);
   fNumEventsHandled++; // One more event that will be actually handled.
   fNumSignalsHandled += event->fWireModel.size() + 1;
 
@@ -891,18 +884,11 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   // "A BLOCK VERSION OF BICGSTAB FOR LINEAR SYSTEMS WITH MULTIPLE RIGHT-HAND SIDES"
   // A. EL GUENNOUNI, K. JBILOU, AND H. SADOK.
   fWatch_BiCGSTAB.Start(false);
-  size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
 
   if(event.fR.size() == 0) {
     // We're still in the setup phase.
     // Start by copying result into R.
-    event.fR.assign(event.fColumnLength * (event.fWireModel.size()+1), 0);
-    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
-      for(size_t j = 0; j < NoiseColLength; j++) {
-        event.fR[i*event.fColumnLength + j] = fNoiseMulResult[IndexToGrab + j];
-      }
-    }
+    FillFromNoise(event.fR, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // But wait, there's more: use this partial AX to guess lagrange multipliers.
     std::vector<double> Y = event.fR;
     DoRestOfMultiplication(event.fX, Y, event); // To make sure we factor in poisson terms.
@@ -923,7 +909,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // First, compute L_trans L.
     std::vector<double> Ltrans_L((event.fWireModel.size()+1)*(event.fWireModel.size()+1),0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-                event.fWireModel.size()+1, event.fWireModel.size()+1, NoiseColLength,
+                event.fWireModel.size()+1, event.fWireModel.size()+1, fNoiseColumnLength,
                 1, &Lterms[0], event.fColumnLength, &Lterms[0], event.fColumnLength,
                 0, &Ltrans_L[0], event.fWireModel.size()+1);
     // Now find the inverse of Ltrans_L, and put it back into Ltrans_L.
@@ -944,9 +930,9 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Add an approximation of the lagrange terms to X; then we can finish multiplying R <-- AX.
     // The terms being modified would not interact with the noise anyway, so it's OK.
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                event.fWireModel.size()+1, event.fWireModel.size()+1, NoiseColLength,
+                event.fWireModel.size()+1, event.fWireModel.size()+1, fNoiseColumnLength,
                 -1, &LInv[0], event.fWireModel.size()+1, &Y[0], event.fColumnLength,
-                0, &event.fX[NoiseColLength], event.fColumnLength);
+                0, &event.fX[fNoiseColumnLength], event.fColumnLength);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fX, event.fR, event);
     // Now, R <-- B - R = B - AX.
@@ -956,7 +942,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Create preconditioner vectors.  For now, we just do something simple (but still fairly effective).
     event.fRPrecon.assign(event.fColumnLength, 1);
     event.fLPrecon.assign(event.fColumnLength, 1);
-    for(size_t i = NoiseColLength; i < event.fColumnLength-1; i++) {
+    for(size_t i = fNoiseColumnLength; i < event.fColumnLength-1; i++) {
       // Apply to wire constraint rows and wire lagrange multiplier columns only.
       event.fRPrecon[i] = 1000;
       event.fLPrecon[i] = 1000;
@@ -981,14 +967,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     event.fprecon_tmp = event.fP;
     event.DoInvRPrecon(event.fprecon_tmp);
     // Now we want V <- AP, so request a multiplication by P.
-    event.fResultIndex = fNoiseMulQueue.size();
-    fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
-    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      for(size_t j = 0; j < NoiseColLength; j++) {
-        fNoiseMulQueue.push_back(event.fprecon_tmp[i*event.fColumnLength + j]);
-      }
-    }
-    fNumVectorsInQueue += event.fWireModel.size() + 1;
+    event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
     fWatch_BiCGSTAB.Stop();
     return false;
   }
@@ -996,13 +975,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // At the beginning of the iteration, we just computed V = AP.
     fTotalIterationsDone++;
     fWatch_BiCGSTAB_part1.Start(false);
-    event.fV.assign(event.fColumnLength * (event.fWireModel.size()+1), 0);
-    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
-      for(size_t j = 0; j < NoiseColLength; j++) {
-        event.fV[i*event.fColumnLength + j] = fNoiseMulResult[IndexToGrab + j];
-      }
-    }
+    FillFromNoise(event.fV, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
     event.DoInvLPrecon(event.fV);
@@ -1045,14 +1018,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Remember to apply preconditioner here too.
     event.fprecon_tmp = event.fR;
     event.DoInvRPrecon(event.fprecon_tmp);
-    event.fResultIndex = fNoiseMulQueue.size();
-    fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
-    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      for(size_t j = 0; j < NoiseColLength; j++) {
-        fNoiseMulQueue.push_back(event.fprecon_tmp[i*event.fColumnLength + j]);
-      }
-    }
-    fNumVectorsInQueue += event.fWireModel.size() + 1;
+    event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
     fWatch_BiCGSTAB_part1.Stop();
     fWatch_BiCGSTAB.Stop();
     return false;
@@ -1060,13 +1026,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   else {
     // We're in the second half of the iteration, where T was just computed.
     fWatch_BiCGSTAB_part2.Start(false);
-    std::vector<double> T(event.fColumnLength * (event.fWireModel.size()+1), 0);
-    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      size_t IndexToGrab = event.fResultIndex + i * NoiseColLength;
-      for(size_t j = 0; j < NoiseColLength; j++) {
-        T[i*event.fColumnLength + j] = fNoiseMulResult[IndexToGrab + j];
-      }
-    }
+    std::vector<double> T;
+    FillFromNoise(T, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, T, event);
     // Finish preconditioner.
@@ -1127,14 +1088,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // And request AP.  Remember preconditioner.
     event.fprecon_tmp = event.fP;
     event.DoInvRPrecon(event.fprecon_tmp);
-    event.fResultIndex = fNoiseMulQueue.size();
-    fNoiseMulQueue.reserve(fNoiseMulQueue.size() + NoiseColLength*(event.fWireModel.size()+1));
-    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      for(size_t j = 0; j < NoiseColLength; j++) {
-        fNoiseMulQueue.push_back(event.fprecon_tmp[i*event.fColumnLength + j]);
-      }
-    }
-    fNumVectorsInQueue += event.fWireModel.size() + 1;
+    event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
     fWatch_BiCGSTAB_part2.Stop();
     fWatch_BiCGSTAB.Stop();
     return false;
@@ -1231,8 +1185,7 @@ void EXORefitSignals::DoNoiseMultiplication()
   // Note that we expect columns in the input to contain only the noise portion, not the constraint rows;
   // otherwise, the vector lengths would not match.
   // The result is placed in fNoiseMulResult.
-  size_t NoiseColLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
-  assert(fNoiseMulQueue.size() == NoiseColLength * fNumVectorsInQueue);
+  assert(fNoiseMulQueue.size() == fNoiseColumnLength * fNumVectorsInQueue);
   fNoiseMulResult.assign(fNoiseMulQueue.size(), 0); // Probably don't need to fill with 0.
 
   // Do the multiplication -- one call for every frequency.
@@ -1242,8 +1195,8 @@ void EXORefitSignals::DoNoiseMultiplication()
     size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 BlockSize, fNumVectorsInQueue, BlockSize,
-                1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], NoiseColLength,
-                0, &fNoiseMulResult[StartIndex], NoiseColLength);
+                1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], fNoiseColumnLength,
+                0, &fNoiseMulResult[StartIndex], fNoiseColumnLength);
   }
   fWatch_NoiseMul.Stop();
 
@@ -1268,4 +1221,43 @@ void EXORefitSignals::EventHandler::DoRPrecon(std::vector<double>& in)
 {
   // Multiply by K2; used to find the preconditioned initial guess.
   for(size_t i = 0; i < in.size(); i++) in[i] /= fRPrecon[i % fColumnLength];
+}
+
+size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
+                                        size_t ColLength)
+{
+  // Request a noise multiplication on vec.
+  // Return value indicates where to retrieve results.
+  assert(fNoiseColumnLength <= ColLength);
+  assert(vec.size() % ColLength == 0);
+
+  size_t NumCols = vec.size() / ColLength;
+  size_t InitSize = fNoiseMulQueue.size();
+  fNoiseMulQueue.reserve(InitSize + NumCols*fNoiseColumnLength);
+  for(size_t i = 0; i < NumCols; i++) {
+    fNoiseMulQueue.insert(fNoiseMulQueue.end(),
+                          vec.begin() + i*ColLength,
+                          vec.begin() + i*ColLength + fNoiseColumnLength);
+  }
+  fNumVectorsInQueue += NumCols;
+  return InitSize;
+}
+
+void EXORefitSignals::FillFromNoise(std::vector<double>& vec,
+                                    size_t NumCols,
+                                    size_t ColLength,
+                                    size_t ResultIndex)
+{
+  // Overwrite in with the results from noise multiplication.
+  // Leave zeros for rows which are not subject to noise multiplication terms.
+  assert(fNoiseColumnLength <= ColLength);
+  assert(ResultIndex % fNoiseColumnLength == 0);
+  assert(ResultIndex + NumCols*fNoiseColumnLength <= fNoiseMulResult.size());
+
+  vec.assign(NumCols*ColLength, 0);
+  for(size_t i = 0; i < NumCols; i++) {
+    std::copy(fNoiseMulResult.begin() +  i   *fNoiseColumnLength,
+              fNoiseMulResult.begin() + (i+1)*fNoiseColumnLength,
+              vec.begin() + i*ColLength);
+  }
 }
