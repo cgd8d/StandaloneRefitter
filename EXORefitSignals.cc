@@ -109,7 +109,8 @@ void cblas_dgemm(const CBLAS_ORDER Order, const CBLAS_TRANSPOSE TransA,
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
                                  EXOTreeOutputModule& outputModule)
-: fInputModule(inputModule),
+: fUseWireAPDCorrelations(true),
+  fInputModule(inputModule),
   fWFTree(wfTree),
   fOutputModule(outputModule),
   fLightmapFilename("data/lightmap/LightMaps.root"),
@@ -162,7 +163,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   for(size_t f = fMinF; f <= fMaxF; f++) {
     bool IsFullBlock = (f != fMaxF);
     std::vector<double>& block = fNoiseCorrelations[f-fMinF];
-    block.resize(fChannels.size()*fChannels.size() * (IsFullBlock ? 4 : 1));
+    block.assign(fChannels.size()*fChannels.size() * (IsFullBlock ? 4 : 1), 0);
 
     // Iterate through column pairs.
     for(size_t index1 = 0; index1 < fChannels.size(); index1++) {
@@ -171,6 +172,10 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
 
       // Start with the real column.
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
+        if(not fUseWireAPDCorrelations) {
+          if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
+             EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
+        }
         unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
         size_t RowPos = ColPos + index2*(IsFullBlock ? 2 : 1);
 
