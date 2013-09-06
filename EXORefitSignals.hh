@@ -118,8 +118,6 @@ class EXORefitSignals
   size_t fNumEventsHandled;
   size_t fNumSignalsHandled;
   size_t fTotalIterationsDone;
-  double fInitialNormWires;
-  double fInitialNormAPDs;
 
   const double fThoriumEnergy_keV;
   const size_t fMinF;
