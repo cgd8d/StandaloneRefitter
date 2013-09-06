@@ -122,6 +122,7 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
 {
   fWFEvent = NULL;
   fWFTree.SetBranchAddress("EventBranch", &fWFEvent);
+  fWatch_TotalTime.Start();
 }
 
 void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
@@ -133,6 +134,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // against that is small.
   // For the future, might consider whether we can rearrange EXONoiseCorrelations to be
   // more convenient for this.
+  fWatch_FillNoise.Start(false);
 
   // Get the channel map.
   const EXOChannelMap& ChannelMap = GetChanMapForHeader(ED.fEventHeader);
@@ -146,7 +148,10 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   }
 
   // If the channel mapping is unchanged, do nothing.
-  if(ChannelsToUse == fChannels) return;
+  if(ChannelsToUse == fChannels) {
+    fWatch_FillNoise.Stop();
+    return;
+  }
 
   // Else, we'll need to extract the noise information to match the new ordering.
   // Start by flushing all currently-held events, since the noise information will change.
@@ -214,6 +219,8 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     }
   }
   fNoiseColumnLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
+
+  fWatch_FillNoise.Stop();
 }
 
 int EXORefitSignals::Initialize()
@@ -287,6 +294,7 @@ int EXORefitSignals::Initialize()
   fWatch_RestMul.Reset();
   fWatch_BiCGSTAB_part1.Reset();
   fWatch_BiCGSTAB_part2.Reset();
+  fWatch_FillNoise.Reset();
   fNumEventsHandled = 0;
   fNumSignalsHandled = 0;
   fTotalIterationsDone = 0;
@@ -296,6 +304,8 @@ int EXORefitSignals::Initialize()
 EXORefitSignals::~EXORefitSignals()
 {
   // Print statistics and timing information.
+  fWatch_TotalTime.Stop();
+
   std::cout<<fNumEventsHandled<<" events were handled by signal refitting."<<std::endl;
   std::cout<<"Those events contained a total of "<<fNumSignalsHandled<<" signals to refit."<<std::endl;
   std::cout<<fTotalIterationsDone<<" iterations were required."<<std::endl;
@@ -309,6 +319,10 @@ EXORefitSignals::~EXORefitSignals()
   fWatch_BiCGSTAB_part1.Print();
   std::cout<<"Part two of iterations (exploiting T = AS):"<<std::endl;
   fWatch_BiCGSTAB_part2.Print();
+  std::cout<<"Setting up noise correlations:"<<std::endl;
+  fWatch_FillNoise.Print();
+  std::cout<<"Total time between construction and destruction:"<<std::endl;
+  fWatch_TotalTime.Print();
 }
 
 EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const

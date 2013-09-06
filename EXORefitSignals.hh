@@ -115,6 +115,8 @@ class EXORefitSignals
   TStopwatch fWatch_BiCGSTAB_part2;
   TStopwatch fWatch_NoiseMul;
   TStopwatch fWatch_RestMul;
+  TStopwatch fWatch_FillNoise;
+  TStopwatch fWatch_TotalTime;
   size_t fNumEventsHandled;
   size_t fNumSignalsHandled;
   size_t fTotalIterationsDone;
