@@ -83,6 +83,7 @@ class EXORefitSignals
     std::vector<double> fRPrecon; // K2_inv
     void DoInvLPrecon(std::vector<double>& in);
     void DoInvRPrecon(std::vector<double>& in);
+    void DoLPrecon(std::vector<double>& in);
     void DoRPrecon(std::vector<double>& in);
 
     // Where in the result matrix can we expect to find the required result?

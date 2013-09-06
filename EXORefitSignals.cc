@@ -1049,13 +1049,17 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Modify R.
     for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] -= omega*T[i];
     // Check if we should conclude here -- R is the residual matrix.
+    // Note: for the benefit of preconditioning comparison studies, I will currently terminate based on
+    // the unpreconditioned residual.  That may be the wrong thing to do down the road.
     double WorstNorm = 0;
+    std::vector<double> R_unprec = event.fR;
+    event.DoLPrecon(R_unprec);
     for(size_t col = 0; col <= event.fWireModel.size(); col++) {
       size_t ColIndex = col*event.fColumnLength;
       size_t NextCol = ColIndex + event.fColumnLength;
-      double Norm = std::inner_product(event.fR.begin() + ColIndex,
-                                       event.fR.begin() + NextCol,
-                                       event.fR.begin() + ColIndex,
+      double Norm = std::inner_product(R_unprec.begin() + ColIndex,
+                                       R_unprec.begin() + NextCol,
+                                       R_unprec.begin() + ColIndex,
                                        double(0));
       std::cout<<"Column "<<col<<" has norm "<<Norm<<std::endl;
       if(Norm > WorstNorm) WorstNorm = Norm;
@@ -1220,6 +1224,12 @@ void EXORefitSignals::EventHandler::DoInvRPrecon(std::vector<double>& in)
 {
   // Multiply by K2_inv.
   for(size_t i = 0; i < in.size(); i++) in[i] *= fRPrecon[i % fColumnLength];
+}
+
+void EXORefitSignals::EventHandler::DoLPrecon(std::vector<double>& in)
+{
+  // Multiply by K1; used for un-preconditioning the residuals.
+  for(size_t i = 0; i < in.size(); i++) in[i] /= fLPrecon[i % fColumnLength];
 }
 
 void EXORefitSignals::EventHandler::DoRPrecon(std::vector<double>& in)
