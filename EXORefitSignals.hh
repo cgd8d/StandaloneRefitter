@@ -9,6 +9,7 @@
 #include <vector>
 #include <map>
 #include <list>
+#include <cassert>
 
 class EXOUWireSignal;
 class EXOTransferFunction;
@@ -160,8 +161,78 @@ class EXORefitSignals
   void DoRestOfMultiplication(const std::vector<double>& in,
                               std::vector<double>& out,
                               EventHandler& event);
+  void DoPoissonMultiplication(const std::vector<double>& in,
+                               std::vector<double>& out,
+                               EventHandler& event);
+  template<char WHICH>
+  void DoLagrangeAndConstraintMul(const std::vector<double>& in,
+                                  std::vector<double>& out,
+                                  EventHandler& event);
 
   // Produce the light model, used on all gangs.
   EXOWaveformFT GetModelForTime(double time) const;
 };
+
+template<char WHICH>
+void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
+                                                 std::vector<double>& out,
+                                                 EventHandler& event)
+{
+  // Do multiplication by Lagrange and constraint terms.
+  // If WHICH = 'L', only handle Lagrange terms.
+  // If WHICH = 'C', only handle constraint terms.
+  // If WHICH = 'A', do both.
+  // All other values of WHICH result in an error.  (This is done to force compile-time optimization.)
+  assert(WHICH == 'L' or WHICH == 'C' or WHICH == 'A');
+  bool Lagrange = (WHICH == 'L' or WHICH == 'A');
+  bool Constraint = (WHICH == 'C' or WHICH == 'A');
+
+  // First loop through wire signals.
+  for(size_t m = 0; m < event.fWireModel.size(); m++) {
+    const std::map<unsigned char, std::vector<double> >& models = event.fWireModel[m].second;
+    for(std::map<unsigned char, std::vector<double> >::const_iterator it = models.begin();
+        it != models.end();
+        it++) {
+      unsigned char ChannelWithWireSignal = it->first;
+      size_t channel_index = 0;
+      while(fChannels[channel_index] != ChannelWithWireSignal) {
+        channel_index++;
+        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
+      }
+      const std::vector<double>& modelWF = it->second;
+      for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+        size_t Index1 = event.fColumnLength - (event.fWireModel.size()+1) + m;
+        size_t Index2 = 2*fChannels.size()*f + channel_index*(f < fMaxF-fMinF ? 2 : 1);
+        for(size_t n = 0; n <= event.fWireModel.size(); n++) {
+          if(Lagrange) out[Index2] += modelWF[2*f]*in[Index1];
+          if(Constraint) out[Index1] += modelWF[2*f]*in[Index2];
+          if(f < fMaxF-fMinF) {
+            if(Lagrange) out[Index2+1] += modelWF[2*f+1]*in[Index1];
+            if(Constraint) out[Index1] += modelWF[2*f+1]*in[Index2+1];
+          }
+          Index1 += event.fColumnLength;
+          Index2 += event.fColumnLength;
+        }
+      }
+    }
+  } // Done with Lagrange and constraint terms for wires.
+  // Now, Lagrange and constraint terms for APDs.
+  for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
+    double ExpectedYieldOnGang = event.fExpectedYieldPerGang.at(fChannels[k]);
+    for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+      size_t Index1 = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
+      size_t Index2 = event.fColumnLength - 1;
+      for(size_t n = 0; n <= event.fWireModel.size(); n++) {
+        if(Constraint) out[Index2] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*in[Index1];
+        if(Lagrange) out[Index1] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*in[Index2];
+        if(f < fMaxF-fMinF) {
+          if(Constraint) out[Index2] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*in[Index1+1];
+          if(Lagrange) out[Index1+1] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*in[Index2];
+        }
+        Index1 += event.fColumnLength;
+        Index2 += event.fColumnLength;
+      }
+    }
+  }
+}
 #endif

@@ -40,7 +40,6 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
-#include <cassert>
 
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
@@ -1039,7 +1038,15 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
   // After noise terms have already been handled, deal with all of the others.
   // This should not be the bottleneck.
   fWatch_RestMul.Start(false);
+  DoPoissonMultiplication(in, out, event);
+  DoLagrangeAndConstraintMul<'A'>(in, out, event);
+  fWatch_RestMul.Stop();
+}
 
+void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
+                                              std::vector<double>& out,
+                                              EventHandler& event)
+{
   // Poisson terms for APD channels.
   for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) { // APD gangs
     double ChannelFactors = event.fExpectedEnergy_keV/fThoriumEnergy_keV;
@@ -1064,56 +1071,6 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
       }
     }
   } // End Poisson terms.
-
-  // Lagrange and constraint terms.
-  // First loop through wire signals.
-  for(size_t m = 0; m < event.fWireModel.size(); m++) {
-    const std::map<unsigned char, std::vector<double> >& models = event.fWireModel[m].second;
-    for(std::map<unsigned char, std::vector<double> >::const_iterator it = models.begin();
-        it != models.end();
-        it++) {
-      unsigned char ChannelWithWireSignal = it->first;
-      size_t channel_index = 0;
-      while(fChannels[channel_index] != ChannelWithWireSignal) {
-        channel_index++;
-        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
-      }
-      const std::vector<double>& modelWF = it->second;
-      for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-        size_t Index1 = event.fColumnLength - (event.fWireModel.size()+1) + m;
-        size_t Index2 = 2*fChannels.size()*f + channel_index*(f < fMaxF-fMinF ? 2 : 1);
-        for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-          out[Index2] += modelWF[2*f]*in[Index1];
-          out[Index1] += modelWF[2*f]*in[Index2];
-          if(f < fMaxF-fMinF) {
-            out[Index2+1] += modelWF[2*f+1]*in[Index1];
-            out[Index1] += modelWF[2*f+1]*in[Index2+1];
-          }
-          Index1 += event.fColumnLength;
-          Index2 += event.fColumnLength;
-        }
-      }
-    }
-  } // Done with Lagrange and constraint terms for wires.
-  // Now, Lagrange and constraint terms for APDs.
-  for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
-    double ExpectedYieldOnGang = event.fExpectedYieldPerGang.at(fChannels[k]);
-    for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-      size_t Index1 = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
-      size_t Index2 = event.fColumnLength - 1;
-      for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-        out[Index2] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*in[Index1];
-        out[Index1] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*in[Index2];
-        if(f < fMaxF-fMinF) {
-          out[Index2] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*in[Index1+1];
-          out[Index1+1] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*in[Index2];
-        }
-        Index1 += event.fColumnLength;
-        Index2 += event.fColumnLength;
-      }
-    }
-  }
-  fWatch_RestMul.Stop();
 }
 
 void EXORefitSignals::DoNoiseMultiplication()
