@@ -682,6 +682,47 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   }
   // Defer guesses for Lagrange multipliers; we'll use AX to produce these.
 
+  // We can also find the appropriate preconditioner here.
+  // This is a pretty good preconditioner, obtained by approximating A ~ {{D L} {trans(L) 0}},
+  // where D is diagonal.  Thus, the approximation comes from ignoring noise cross-terms and
+  // Poisson noise terms.
+  // Haven't decided yet whether it's important to include Poisson terms on the diagonal; currently I don't.
+  event->fDiag.resize(fNoiseColumnLength);
+  for(size_t i = 0; i < fNoiseColumnLength; i++) {
+    size_t f = i/(2*fChannels.size());
+    size_t c = i%(2*fChannels.size());
+    size_t block = fChannels.size()*(f < fMaxF-fMinF ? 2 : 1);
+    event->fDiag[i] = fNoiseCorrelations[f][block*c + c];
+  }
+  // Find X using trans(X)X = trans(L) D^(-1) L.
+  std::vector<double> Temp1(event->fColumnLength * (event->fWireModel.size()+1), 0);
+  std::vector<double> Temp2(event->fColumnLength * (event->fWireModel.size()+1), 0);
+  for(size_t i = 0; i < event->fWireModel.size()+1; i++) {
+    Temp1[i*event->fColumnLength + fNoiseColumnLength + i] = 1;
+  } // Temp1 = {{0}{I}}
+  DoLagrangeAndConstraintMul<'L'>(Temp1, Temp2, *event); // Temp2 = {{L} {0}}
+  for(size_t i = 0; i < Temp2.size(); i++) {
+    size_t modi = i % event->fColumnLength;
+    if(modi >= fNoiseColumnLength) continue;
+    Temp2[i] /= event->fDiag[modi];
+  } // Now Temp2 = {{ D^(-1)L} {0}}
+  Temp1.assign(event->fColumnLength * (event->fWireModel.size()+1), 0);
+  DoLagrangeAndConstraintMul<'C'>(Temp2, Temp1, *event); // Temp1 = {{0} {trans(L)D^(-1)L}}
+  // Here I could produce a packed version; but I don't think the performance boost will be significant.
+  // Remember X is a small matrix.
+  // Produce the Cholesky decomposition, and store it in event->fPreconX.
+  lapack_int ret;
+  ret = LAPACKE_dpotrf(LAPACK_COL_MAJOR, 'U', event->fWireModel.size()+1,
+                       &Temp1[fNoiseColumnLength], event->fColumnLength);
+  if(ret != 0) LogEXOMsg("Failed factorization", EEAlert);
+  event->fPreconX.assign((event->fWireModel.size()+1)*(event->fWireModel.size()+1), 0);
+  for(size_t i = 0; i < event->fWireModel.size()+1; i++) {
+    for(size_t j = 0; j <= i; j++) {
+      event->fPreconX[i*(event->fWireModel.size()+1) + j] =
+        Temp1[i*event->fColumnLength + fNoiseColumnLength + j];
+    }
+  }
+
   // Push event onto the list of event handlers.
   fEventHandlerList.push_back(event);
 
@@ -755,7 +796,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 
   if(not event->fX.empty()) {
     // Undo preconditioning of X.
-    event->DoInvRPrecon(event->fX);
+    event->fX = DoInvRPrecon(event->fX, *event);
 
     // We need to compute denoised signals.
     fWFTree.GetEntryWithIndex(ED->fRunNumber, ED->fEventNumber);
@@ -888,23 +929,14 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     for(size_t i = 0; i < event.fR.size(); i++) {
       event.fR[i] = B[i] - event.fR[i];
     }
-    // Create preconditioner vectors.  For now, we just do something simple (but still fairly effective).
-    event.fRPrecon.assign(event.fColumnLength, 1);
-    event.fLPrecon.assign(event.fColumnLength, 1);
-    for(size_t i = fNoiseColumnLength; i < event.fColumnLength-1; i++) {
-      // Apply to wire constraint rows and wire lagrange multiplier columns only.
-      event.fRPrecon[i] = 1000;
-      event.fLPrecon[i] = 1000;
-    }
     // Now precondition R and X0 appropriately.
-    event.DoRPrecon(event.fX);
-    event.DoInvLPrecon(event.fR);
+    event.fX = DoRPrecon(event.fX, event);
+    event.fR = DoInvLPrecon(event.fR, event);
     // Set up other pieces of the handler.
     event.fP = event.fR;
     event.fR0hat = event.fR;
     // We'll take K1_inv A K2_inv P, so compute K2_inv P.
-    event.fprecon_tmp = event.fP;
-    event.DoInvRPrecon(event.fprecon_tmp);
+    event.fprecon_tmp = DoInvRPrecon(event.fP, event);
     // Now we want V <- AP, so request a multiplication by P.
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
     fWatch_BiCGSTAB.Stop();
@@ -917,7 +949,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     FillFromNoise(event.fV, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
-    event.DoInvLPrecon(event.fV);
+    event.fV = DoInvLPrecon(event.fV, event);
     // Factorize fR0hat*V, so that we can solve equations using it twice.
     event.fR0hat_V_factors.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
@@ -948,8 +980,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 1, &event.fR[0], event.fColumnLength);
     // Now we desire T = AR (AS in paper).  Request a matrix multiplication, and return.
     // Remember to apply preconditioner here too.
-    event.fprecon_tmp = event.fR;
-    event.DoInvRPrecon(event.fprecon_tmp);
+    event.fprecon_tmp = DoInvRPrecon(event.fR, event);
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
     fWatch_BiCGSTAB_part1.Stop();
     fWatch_BiCGSTAB.Stop();
@@ -963,7 +994,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, T, event);
     // Finish preconditioner.
-    event.DoInvLPrecon(T);
+    T = DoInvLPrecon(T, event);
     // Compute omega.
     double omega = std::inner_product(T.begin(), T.end(), event.fR.begin(), double(0)) /
                    std::inner_product(T.begin(), T.end(), T.begin(), double(0));
@@ -979,8 +1010,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Note: for the benefit of preconditioning comparison studies, I will currently terminate based on
     // the unpreconditioned residual.  That may be the wrong thing to do down the road.
     double WorstNorm = 0;
-    std::vector<double> R_unprec = event.fR;
-    event.DoLPrecon(R_unprec);
+    std::vector<double> R_unprec = DoLPrecon(event.fR, event);
     for(size_t col = 0; col <= event.fWireModel.size(); col++) {
       size_t ColIndex = col*event.fColumnLength;
       size_t NextCol = ColIndex + event.fColumnLength;
@@ -1022,8 +1052,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     event.fR0hat_V_factors.clear();
     event.fR0hat_V_pivot.clear();
     // And request AP.  Remember preconditioner.
-    event.fprecon_tmp = event.fP;
-    event.DoInvRPrecon(event.fprecon_tmp);
+    event.fprecon_tmp = DoInvRPrecon(event.fP, event);
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
     fWatch_BiCGSTAB_part2.Stop();
     fWatch_BiCGSTAB.Stop();
@@ -1099,28 +1128,87 @@ void EXORefitSignals::DoNoiseMultiplication()
   fNumVectorsInQueue = 0;
 }
 
-void EXORefitSignals::EventHandler::DoInvLPrecon(std::vector<double>& in)
+std::vector<double> EXORefitSignals::DoInvLPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K1_inv.
-  for(size_t i = 0; i < in.size(); i++) in[i] *= fLPrecon[i % fColumnLength];
+  std::vector<double> out(in.size(), 0);
+  for(size_t i = 0; i < out.size(); i++) {
+    size_t imod = i % event.fColumnLength;
+    if(imod < fNoiseColumnLength) out[i] = in[i] / event.fDiag[imod];
+  } // out = {{D^(-1) v1} {0}}
+  DoLagrangeAndConstraintMul<'C'>(out, out, event); // out = {{D^(-1)v1} {trans(L)D^(-1)v1}}
+  for(size_t i = 0; i < in.size(); i++) {
+    size_t imod = i % event.fColumnLength;
+    if(imod < fNoiseColumnLength) out[i] = in[i]/std::sqrt(event.fDiag[imod]);
+    else out[i] -= in[i];
+  } // out = {{D^(-1/2)v1} {trans(L)D^(-1)v1 - v2}}
+  cblas_dtrsm(CblasColMajor, CblasLeft, CblasUpper, CblasTrans, CblasNonUnit,
+              event.fWireModel.size()+1, event.fWireModel.size()+1,
+              1, &event.fPreconX[0], event.fWireModel.size()+1,
+              &out[fNoiseColumnLength], event.fColumnLength);
+  // out = {{D^(-1/2)v1} {Inv(trans(X))(trans(L)D^(-1)v1 - v2)}}.
+  return out;
 }
 
-void EXORefitSignals::EventHandler::DoInvRPrecon(std::vector<double>& in)
+std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K2_inv.
-  for(size_t i = 0; i < in.size(); i++) in[i] *= fRPrecon[i % fColumnLength];
+  std::vector<double> out(in.size(), 0);
+  for(size_t i = 0; i < in.size(); i++) {
+    size_t imod = i % event.fColumnLength;
+    if(imod >= fNoiseColumnLength) out[i] = in[i];
+  }
+  cblas_dtrsm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
+              event.fWireModel.size()+1, event.fWireModel.size()+1,
+              1, &event.fPreconX[0], event.fWireModel.size()+1,
+              &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {X^(-1)v2}}
+  DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{LX^(-1)v2} {X^(-1)v2}}
+  for(size_t i = 0; i < out.size(); i++) {
+    size_t imod = i % event.fColumnLength;
+    if(imod < fNoiseColumnLength) out[i] = in[i]/sqrt(event.fDiag[imod]) - out[i]/event.fDiag[imod];
+  } // out = {{D^(-1/2)v1 - D^(-1)LX^(-1)v2} {X^(-1)v2}}
+  return out;
 }
 
-void EXORefitSignals::EventHandler::DoLPrecon(std::vector<double>& in)
+std::vector<double> EXORefitSignals::DoLPrecon(std::vector<double>& in, EventHandler& event)
 {
-  // Multiply by K1; used for un-preconditioning the residuals.
-  for(size_t i = 0; i < in.size(); i++) in[i] /= fLPrecon[i % fColumnLength];
+  // Multiply by K1.
+  std::vector<double> out = in;
+  cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasTrans, CblasNonUnit,
+              event.fWireModel.size()+1, event.fWireModel.size()+1,
+              -1, &event.fPreconX[0], event.fWireModel.size()+1,
+              &out[fNoiseColumnLength], event.fColumnLength); // out = {{v1} {-trans(X)v2}}
+  for(size_t i = 0; i < out.size(); i++) {
+    size_t imod = i % event.fColumnLength;
+    if(imod < fNoiseColumnLength) out[i] /= std::sqrt(event.fDiag[imod]);
+  } // out = {{D^(-1/2)v1} {-trans(X)v2}}
+  DoLagrangeAndConstraintMul<'C'>(out, out, event); // out = {{D^(-1/2)v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
+  for(size_t i = 0; i < out.size(); i++) {
+    size_t imod = i % event.fColumnLength;
+    if(imod < fNoiseColumnLength) out[i] = std::sqrt(event.fDiag[imod])*in[i];
+  } // out = {{D^(1/2)v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
+  return out;
 }
 
-void EXORefitSignals::EventHandler::DoRPrecon(std::vector<double>& in)
+std::vector<double> EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHandler& event)
 {
-  // Multiply by K2; used to find the preconditioned initial guess.
-  for(size_t i = 0; i < in.size(); i++) in[i] /= fRPrecon[i % fColumnLength];
+  // Multiply by K2.
+  std::vector<double> out(in.size(), 0);
+  for(size_t i = 0; i < out.size(); i++) {
+    size_t imod = i % event.fColumnLength;
+    if(imod >= fNoiseColumnLength) out[i] = in[i];
+  } // out = {{0} {v2}}  
+  DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{Lv2} {v2}}
+  cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
+              event.fWireModel.size()+1, event.fWireModel.size()+1,
+              1, &event.fPreconX[0], event.fWireModel.size()+1,
+              &out[fNoiseColumnLength], event.fColumnLength); // out = {{Lv2} {Xv2}}
+  for(size_t i = 0; i < out.size(); i++) {
+    size_t imod = i % event.fColumnLength;
+    if(imod < fNoiseColumnLength) out[i] = std::sqrt(event.fDiag[imod])*in[i] +
+                                           out[i]/std::sqrt(event.fDiag[imod]);
+  } // out = {{D^(1/2)v1 + D^(-1/2)Lv2} {Xv2}}
+  return out;
 }
 
 size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,

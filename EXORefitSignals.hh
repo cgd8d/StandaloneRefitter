@@ -83,12 +83,15 @@ class EXORefitSignals
     std::vector<double> fprecon_tmp; // For storing the right-preconditioned version of a vector.
 
     // Preconditioner stuff.
-    std::vector<double> fLPrecon; // K1_inv
-    std::vector<double> fRPrecon; // K2_inv
-    void DoInvLPrecon(std::vector<double>& in);
-    void DoInvRPrecon(std::vector<double>& in);
-    void DoLPrecon(std::vector<double>& in);
-    void DoRPrecon(std::vector<double>& in);
+    // We approximate approx(A) = {{D L} {trans(L) 0}}, where D is diagonal.
+    // Then approx(A) = {{D^(0.5) 0} {trans(L)D^(-0.5) -trans(X)}}.{{D^(0.5) D^(-0.5)L}{0 X}},
+    // for some X.
+    // X can be obtained by doing Cholesky factoring with trans(X)X = trans(L) D^(-1) L,
+    // which is done using LAPACK.
+    // We precondition with K1 as the first, and K2 as the second;
+    // both are easy to invert.
+    std::vector<double> fDiag; // Diagonal entries of noise matrix.
+    std::vector<double> fPreconX; // X, which is upper-triangular (unpacked).
 
     // Where in the result matrix can we expect to find the required result?
     size_t fResultIndex;
@@ -169,6 +172,12 @@ class EXORefitSignals
                                   std::vector<double>& out,
                                   EventHandler& event);
 
+  // Preconditioner functions.
+  std::vector<double> DoInvLPrecon(std::vector<double>& in, EventHandler& event);
+  std::vector<double> DoInvRPrecon(std::vector<double>& in, EventHandler& event);
+  std::vector<double> DoLPrecon(std::vector<double>& in, EventHandler& event);
+  std::vector<double> DoRPrecon(std::vector<double>& in, EventHandler& event);
+
   // Produce the light model, used on all gangs.
   EXOWaveformFT GetModelForTime(double time) const;
 };
@@ -183,7 +192,9 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   // If WHICH = 'C', only handle constraint terms.
   // If WHICH = 'A', do both.
   // All other values of WHICH result in an error.  (This is done to force compile-time optimization.)
+  // In and out should only be equal if WHICH != 'A'.
   assert(WHICH == 'L' or WHICH == 'C' or WHICH == 'A');
+  assert(WHICH == 'L' or WHICH == 'C' or &in[0] != &out[0]);
   bool Lagrange = (WHICH == 'L' or WHICH == 'A');
   bool Constraint = (WHICH == 'C' or WHICH == 'A');
 
