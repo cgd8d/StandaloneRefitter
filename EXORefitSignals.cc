@@ -38,73 +38,11 @@
 #include "TH3D.h"
 #include "TGraph.h"
 #include "TMatrixD.h"
+#include "mkl_cblas.h"
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <cassert>
-
-// Declarations necessary to use dgemm from a BLAS library.
-enum CBLAS_ORDER {CblasRowMajor=101, CblasColMajor=102};
-enum CBLAS_TRANSPOSE {CblasNoTrans=111, CblasTrans=112, CblasConjTrans=113};
-#ifdef HAVE_BLAS
-extern "C"
-#endif
-void cblas_dgemm(const CBLAS_ORDER Order, const CBLAS_TRANSPOSE TransA,
-                 const CBLAS_TRANSPOSE TransB, const int M, const int N,
-                 const int K, const double alpha, const double *A,
-                 const int lda, const double *B, const int ldb,
-                 const double beta, double *C, const int ldc)
-#ifdef HAVE_BLAS
-; // Just a declaration -- use the optimized BLAS library provided.
-#else
-{
-  // Provide my own implementation when no optimized BLAS is available.
-  // This might be inefficient, depending on how clever the compiler is.
-  // Note also that I don't do any checking of the arguments.
-
-  // Loop through entries in C.
-  for(int row = 0; row < M; row++) {
-    for(int col = 0; col < N; col++) {
-      size_t C_index;
-      if(Order == CblasRowMajor) C_index = row*ldc + col;
-      else C_index = col*ldc + row;
-
-      size_t A_index, A_stride;
-      if((Order == CblasRowMajor and TransA == CblasNoTrans) or
-         (Order == CblasColMajor and TransA != CblasNoTrans)) {
-        A_index = row*lda;
-        A_stride = 1;
-      }
-      else /* (Order == CblasRowMajor and TransA != CblasNoTrans) or
-              (Order == CblasColMajor and TransA == CblasNoTrans)*/ {
-        A_index = row;
-        A_stride = lda;
-      }
-
-      size_t B_index, B_stride;
-      if((Order == CblasRowMajor and TransB == CblasNoTrans) or
-         (Order == CblasColMajor and TransB != CblasNoTrans)) {
-        B_index = col;
-        B_stride = ldb;
-      }
-      else /* (Order == CblasRowMajor and TransB != CblasNoTrans) or
-              (Order == CblasColMajor and TransB == CblasNoTrans)*/ {
-        B_index = col*ldb;
-        B_stride = 1;
-      }
-
-      double acc = 0;
-      for(int i = 0; i < K; i++) {
-        acc += A[A_index] * B[B_index];
-        A_index += A_stride;
-        B_index += B_stride;
-      }
-      C[C_index] *= beta;
-      C[C_index] += alpha * acc;
-    } // End loop over columns of C
-  } // End loop over rows of C
-}
-#endif
 
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
@@ -228,10 +166,6 @@ int EXORefitSignals::Initialize()
   // Open the lightmap file, and extract their information.
   // Create unshaped wire drift waveforms.
   // Also initialize our various timers.
-
-#ifndef HAVE_BLAS
-  LogEXOMsg("You are not using an optimized BLAS -- performance may suffer.", EEWarning);
-#endif
 
   std::string FullLightmapFilename = EXOMiscUtil::SearchForFile(fLightmapFilename);
   if(FullLightmapFilename == "") LogEXOMsg("Failed to find lightmap file.", EEAlert);
