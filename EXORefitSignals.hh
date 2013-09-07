@@ -3,6 +3,8 @@
 
 #include "EXOUtilities/EXOTemplWaveform.hh"
 #include "TStopwatch.h"
+#include "mkl_cblas.h"
+#include "mkl_lapacke.h"
 #include <string>
 #include <vector>
 #include <map>
@@ -75,7 +77,8 @@ class EXORefitSignals
     std::vector<double> fR0hat;
     std::vector<double> fV; // only needed within an iteration.
     std::vector<double> fAlpha; // only needed within an iteration.
-    std::vector<double> fR0hat_V_Inv; // only needed within an iteration; not strictly needed, but convenient.
+    std::vector<double> fR0hat_V_factors;
+    std::vector<lapack_int> fR0hat_V_pivot;
     std::vector<double> fprecon_tmp; // For storing the right-preconditioned version of a vector.
 
     // Preconditioner stuff.

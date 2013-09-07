@@ -37,8 +37,6 @@
 #include "TArrayI.h"
 #include "TH3D.h"
 #include "TGraph.h"
-#include "TMatrixD.h"
-#include "mkl_cblas.h"
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -833,6 +831,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   // "A BLOCK VERSION OF BICGSTAB FOR LINEAR SYSTEMS WITH MULTIPLE RIGHT-HAND SIDES"
   // A. EL GUENNOUNI, K. JBILOU, AND H. SADOK.
   fWatch_BiCGSTAB.Start(false);
+  lapack_int ret;
 
   if(event.fR.size() == 0) {
     // We're still in the setup phase.
@@ -862,14 +861,16 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 1, &Lterms[0], event.fColumnLength, &Lterms[0], event.fColumnLength,
                 0, &Ltrans_L[0], event.fWireModel.size()+1);
     // Now find the inverse of Ltrans_L, and put it back into Ltrans_L.
-    TMatrixD RootMatrix(event.fWireModel.size()+1, event.fWireModel.size()+1); // For now, avoid using LAPACK.
-    for(size_t i = 0; i < Ltrans_L.size(); i++) {
-      RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1)) = Ltrans_L[i];
-    }
-    RootMatrix.InvertFast();
-    for(size_t i = 0; i < Ltrans_L.size(); i++) {
-      Ltrans_L[i] = RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1));
-    }
+    lapack_int* ipiv = new lapack_int[event.fWireModel.size()+1];
+    ret = LAPACKE_dgetrf(LAPACK_COL_MAJOR, event.fWireModel.size()+1, event.fWireModel.size()+1,
+                         &Ltrans_L[0], event.fWireModel.size()+1,
+                         ipiv);
+    if(ret != 0) LogEXOMsg("Failed Factorization", EEAlert);
+    ret = LAPACKE_dgetri(LAPACK_COL_MAJOR, event.fWireModel.size()+1,
+                         &Ltrans_L[0], event.fWireModel.size()+1,
+                         ipiv);
+    if(ret != 0) LogEXOMsg("Failed Inversion", EEAlert);
+    delete ipiv;
     // Multiply on the right by transpose-L; put the left inverse of L in LInv.
     std::vector<double> LInv(event.fColumnLength * (event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans,
@@ -918,36 +919,29 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
     event.DoInvLPrecon(event.fV);
-    // Compute fR0hat_V_Inv.
-    // (Taking the actual inverse is probably not the most efficient approach,
-    //  but it's the easiest and this is a small matrix.
-    //  Plus, I'll use it twice, so we get to reuse this work.)
-    event.fR0hat_V_Inv.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    // Factorize fR0hat*V, so that we can solve equations using it twice.
+    event.fR0hat_V_factors.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
                 1, &event.fR0hat[0], event.fColumnLength, &event.fV[0], event.fColumnLength,
-                0, &event.fR0hat_V_Inv[0], event.fWireModel.size() + 1);
-    TMatrixD RootMatrix(event.fWireModel.size()+1, event.fWireModel.size()+1); // For now, avoid using LAPACK.
-    for(size_t i = 0; i < event.fR0hat_V_Inv.size(); i++) {
-      RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1)) = event.fR0hat_V_Inv[i];
-    }
-    RootMatrix.InvertFast();
-    for(size_t i = 0; i < event.fR0hat_V_Inv.size(); i++) {
-      event.fR0hat_V_Inv[i] = RootMatrix(i % (event.fWireModel.size()+1), i / (event.fWireModel.size()+1));
-    }
-    // Compute R0hat_R.
-    std::vector<double> R0hat_R((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+                0, &event.fR0hat_V_factors[0], event.fWireModel.size() + 1);
+    event.fR0hat_V_pivot.resize(event.fWireModel.size()+1);
+    ret = LAPACKE_dgetrf(LAPACK_COL_MAJOR, event.fWireModel.size()+1, event.fWireModel.size()+1,
+                         &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
+                         &event.fR0hat_V_pivot[0]);
+    if(ret != 0) LogEXOMsg("Factorization failed", EEAlert);
+    // Now compute alpha.
+    event.fAlpha.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
                 1, &event.fR0hat[0], event.fColumnLength, &event.fR[0], event.fColumnLength,
-                0, &R0hat_R[0], event.fWireModel.size() + 1);
-    // Now compute alpha.
-    event.fAlpha.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
-    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
-                1, &event.fR0hat_V_Inv[0], event.fWireModel.size() + 1,
-                &R0hat_R[0], event.fWireModel.size() + 1,
                 0, &event.fAlpha[0], event.fWireModel.size() + 1);
+    ret = LAPACKE_dgetrs(LAPACK_COL_MAJOR, 'N',
+                         event.fWireModel.size()+1, event.fWireModel.size()+1,
+                         &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
+                         &event.fR0hat_V_pivot[0],
+                         &event.fAlpha[0], event.fWireModel.size()+1);
+    if(ret != 0) LogEXOMsg("Solving failed", EEAlert);
     // Update R <-- R - V*alpha.
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
@@ -1003,19 +997,18 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       fWatch_BiCGSTAB.Stop();
       return true;
     }
-    // Compute R0hat_T.
-    std::vector<double> R0hat_T((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    // Now compute beta, solving R0hat_V beta = -R0hat_T
+    std::vector<double> Beta((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
-                1, &event.fR0hat[0], event.fColumnLength, &T[0], event.fColumnLength,
-                0, &R0hat_T[0], event.fWireModel.size() + 1);
-    // Now compute beta = -fR0hat_V_Inv * R0hat_T.
-    std::vector<double> Beta((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
-    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
-                -1, &event.fR0hat_V_Inv[0], event.fWireModel.size() + 1,
-                &R0hat_T[0], event.fWireModel.size() + 1,
+                -1, &event.fR0hat[0], event.fColumnLength, &T[0], event.fColumnLength,
                 0, &Beta[0], event.fWireModel.size() + 1);
+    ret = LAPACKE_dgetrs(LAPACK_COL_MAJOR, 'N',
+                         event.fWireModel.size()+1, event.fWireModel.size()+1,
+                         &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
+                         &event.fR0hat_V_pivot[0],
+                         &Beta[0], event.fWireModel.size()+1);
+    if(ret != 0) LogEXOMsg("Solving failed", EEAlert);
     // Update P.  Overwrite T for temporary work.
     T = event.fR;
     for(size_t i = 0; i < event.fP.size(); i++) event.fP[i] -= omega*event.fV[i];
@@ -1027,7 +1020,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Clear vectors in event which are no longer needed -- this helps us keep track of where we are.
     event.fV.clear();
     event.fAlpha.clear();
-    event.fR0hat_V_Inv.clear();
+    event.fR0hat_V_factors.clear();
+    event.fR0hat_V_pivot.clear();
     // And request AP.  Remember preconditioner.
     event.fprecon_tmp = event.fP;
     event.DoInvRPrecon(event.fprecon_tmp);
