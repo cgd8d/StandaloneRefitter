@@ -609,82 +609,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // For convenience, store the column length we'll be dealing with.
   event->fColumnLength = 2*fChannels.size()*(fMaxF-fMinF) + fChannels.size() + event->fWireModel.size() + 1;
 
-  // Set up a simple, but not quite crazy, initial guess for X.
-  event->fX.assign(event->fColumnLength * (event->fWireModel.size() + 1), 0);
-
-  // Start with the wires.
-  for(size_t i = 0; i < event->fWireModel.size(); i++) {
-    size_t ColIndex = i*event->fColumnLength;
-    double Normalization = 0;
-    for(std::map<unsigned char, std::vector<double> >::iterator it = event->fWireModel[i].second.begin();
-        it != event->fWireModel[i].second.end();
-        it++) {
-      std::vector<double>& model = it->second;
-      size_t channel_index = 0;
-      while(fChannels[channel_index] != it->first) {
-        channel_index++;
-        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
-      }
-      for(size_t f = fMinF; f <= fMaxF; f++) {
-        size_t step = (f < fMaxF ? 2 : 1);
-        size_t ColIndex = step*step*fChannels.size()*channel_index;
-        double RNoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index];
-        Normalization += model[2*(f-fMinF)]*model[2*(f-fMinF)]/RNoiseVal;
-        if(step == 2) {
-          ColIndex += step*fChannels.size();
-          double INoiseVal = fNoiseCorrelations[f-fMinF][ColIndex + step*channel_index + 1];
-          Normalization += model[2*(f-fMinF)+1]*model[2*(f-fMinF)+1]/INoiseVal;
-        }
-      }
-    } // Have overall normalization for this signal.
-    for(std::map<unsigned char, std::vector<double> >::iterator it = event->fWireModel[i].second.begin();
-        it != event->fWireModel[i].second.end();
-        it++) {
-      std::vector<double>& model = it->second;
-      size_t channel_index = 0;
-      while(fChannels[channel_index] != it->first) {
-        channel_index++;
-        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
-      }
-      for(size_t f = fMinF; f <= fMaxF; f++) {
-        size_t step = (f < fMaxF ? 2 : 1);
-        size_t RowIndex = ColIndex + 2*fChannels.size()*(f-fMinF);
-        RowIndex += channel_index*step;
-        size_t NoiseColIndex = step*step*fChannels.size()*channel_index;
-
-        double RNoise = fNoiseCorrelations[f-fMinF][NoiseColIndex + step*channel_index];
-        event->fX[RowIndex] = model[2*(f-fMinF)]/(RNoise*Normalization);
-        if(f != fMaxF) {
-          NoiseColIndex += step*fChannels.size();
-          double INoise = fNoiseCorrelations[f-fMinF][NoiseColIndex + step*channel_index + 1];
-          event->fX[RowIndex+1] = model[2*(f-fMinF) + 1]/(INoise*Normalization);
-        }
-      }
-    }
-  }
-  // And then do the one light signal.
-  double norm_APDmodel = std::inner_product(event->fmodel_realimag.begin(), event->fmodel_realimag.end(),
-                                            event->fmodel_realimag.begin(), double(0));
-  double SumSqYieldExpected = 0;
-  for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
-    SumSqYieldExpected += std::pow(event->fExpectedYieldPerGang[fChannels[i]], 2);
-  }
-  for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
-    double ExpectedYieldOnChannel = event->fExpectedYieldPerGang[fChannels[i]];
-    double LeadingFactor = ExpectedYieldOnChannel/(SumSqYieldExpected*norm_APDmodel);
-
-    size_t ColIndex = event->fWireModel.size()*event->fColumnLength;
-    for(size_t f = fMinF; f <= fMaxF; f++) {
-      size_t RowIndex = ColIndex + 2*fChannels.size()*(f-fMinF);
-      RowIndex += i*(f != fMaxF ? 2 : 1);
-
-      event->fX[RowIndex] = LeadingFactor*event->fmodel_realimag[2*(f-fMinF)];
-      if(f != fMaxF) event->fX[RowIndex+1] = LeadingFactor*event->fmodel_realimag[2*(f-fMinF)+1];
-    }
-  }
-  // Defer guesses for Lagrange multipliers; we'll use AX to produce these.
-
-  // We can also find the appropriate preconditioner here.
+  // We can find the appropriate preconditioner here.
   // This is a pretty good preconditioner, obtained by approximating A ~ {{D L} {trans(L) 0}},
   // where D is diagonal.  Thus, the approximation comes from ignoring noise cross-terms and
   // Poisson noise terms.
@@ -739,6 +664,19 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     delete event;
     return;
   }
+
+  // Give a really nice initial guess for X, obtained by solving exactly
+  // with the approximate version of the matrix used for preconditioning.
+  // The inverse of approx(A) = K1.K2 is Inv(K2).Inv(K1).
+  event->fX.assign(event->fColumnLength * (event->fWireModel.size()+1), 0);
+  for(size_t i = 0; i <= event->fWireModel.size(); i++) {
+    size_t Index = (i+1)*event->fColumnLength; // Next column; then subtract.
+    Index -= event->fWireModel.size() + 1; // Step backward.
+    Index += i; // Go forward to the right entry.
+    event->fX[Index] = 1; // All models are normalized to 1.
+  }
+  event->fX = DoInvLPrecon(event->fX, *event);
+  event->fX = DoInvRPrecon(event->fX, *event);
 
   // Push event onto the list of event handlers.
   fEventHandlerList.push_back(event);
@@ -894,9 +832,9 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // We're still in the setup phase.
     // Start by copying result into R.
     FillFromNoise(event.fR, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
-    // But wait, there's more: use this partial AX to guess lagrange multipliers.
-    std::vector<double> Y = event.fR;
-    DoRestOfMultiplication(event.fX, Y, event); // To make sure we factor in poisson terms.
+    // Now need to finish multiplying by A, accounting for the other terms.
+    DoRestOfMultiplication(event.fX, event.fR, event);
+    // Now, R <-- B - R = B - AX.
     std::vector<double> B(event.fColumnLength * (event.fWireModel.size()+1), 0);
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       size_t Index = (i+1)*event.fColumnLength; // Next column; then subtract.
@@ -904,45 +842,6 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       Index += i; // Go forward to the right entry.
       B[Index] = 1; // All models are normalized to 1.
     }
-    // Use B to extract the Lagrange multiplier terms of the matrix.
-    std::vector<double> Lterms(event.fColumnLength * (event.fWireModel.size()+1), 0);
-    DoRestOfMultiplication(B, Lterms, event); // A little wasteful, but that's OK for now.
-    // Solve for a left-inverse of L.
-    // The idea here is, if A = { {M L} {C 0} } (blocks) and our initial guess is {{X}{K}},
-    // we want MX + LK ~ 0.  Now we've computed MX; so we can solve for a value of K
-    // which makes this smallish.
-    // First, compute L_trans L.
-    std::vector<double> Ltrans_L((event.fWireModel.size()+1)*(event.fWireModel.size()+1),0);
-    cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-                event.fWireModel.size()+1, event.fWireModel.size()+1, fNoiseColumnLength,
-                1, &Lterms[0], event.fColumnLength, &Lterms[0], event.fColumnLength,
-                0, &Ltrans_L[0], event.fWireModel.size()+1);
-    // Now find the inverse of Ltrans_L, and put it back into Ltrans_L.
-    lapack_int* ipiv = new lapack_int[event.fWireModel.size()+1];
-    ret = LAPACKE_dgetrf(LAPACK_COL_MAJOR, event.fWireModel.size()+1, event.fWireModel.size()+1,
-                         &Ltrans_L[0], event.fWireModel.size()+1,
-                         ipiv);
-    if(ret != 0) LogEXOMsg("Failed Factorization", EEAlert);
-    ret = LAPACKE_dgetri(LAPACK_COL_MAJOR, event.fWireModel.size()+1,
-                         &Ltrans_L[0], event.fWireModel.size()+1,
-                         ipiv);
-    if(ret != 0) LogEXOMsg("Failed Inversion", EEAlert);
-    delete ipiv;
-    // Multiply on the right by transpose-L; put the left inverse of L in LInv.
-    std::vector<double> LInv(event.fColumnLength * (event.fWireModel.size()+1), 0);
-    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans,
-                event.fWireModel.size()+1, event.fColumnLength, event.fWireModel.size()+1,
-                1, &Ltrans_L[0], event.fWireModel.size()+1, &Lterms[0], event.fColumnLength,
-                0, &LInv[0], event.fWireModel.size()+1);
-    // Add an approximation of the lagrange terms to X; then we can finish multiplying R <-- AX.
-    // The terms being modified would not interact with the noise anyway, so it's OK.
-    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                event.fWireModel.size()+1, event.fWireModel.size()+1, fNoiseColumnLength,
-                -1, &LInv[0], event.fWireModel.size()+1, &Y[0], event.fColumnLength,
-                0, &event.fX[fNoiseColumnLength], event.fColumnLength);
-    // Now need to finish multiplying by A, accounting for the other terms.
-    DoRestOfMultiplication(event.fX, event.fR, event);
-    // Now, R <-- B - R = B - AX.
     for(size_t i = 0; i < event.fR.size(); i++) {
       event.fR[i] = B[i] - event.fR[i];
     }
