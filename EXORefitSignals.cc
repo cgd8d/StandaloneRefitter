@@ -40,11 +40,13 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <cstdlib>
 
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
                                  EXOTreeOutputModule& outputModule)
 : fUseWireAPDCorrelations(true),
+  fOnlyEstimateConditionNumbers(false),
   fInputModule(inputModule),
   fWFTree(wfTree),
   fOutputModule(outputModule),
@@ -723,6 +725,21 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     }
   }
 
+  // If our objective is to report condition numbers, proceed to do that.
+  if(fOnlyEstimateConditionNumbers) {
+    std::cout<<"For entry "<<event->fEntryNumber<<":"<<std::endl;
+    std::pair<double, double> MinMax = EstimateConditionNumber(*event);
+    std::cout<<"\tCondition number >= "<<MinMax.second/MinMax.first<<std::endl;
+    for(size_t i = 1; i < 10; i++) {
+      std::pair<double, double> TempMinMax = EstimateConditionNumber(*event);
+      if(TempMinMax.first < MinMax.first) MinMax.first = TempMinMax.first;
+      if(TempMinMax.second > MinMax.second) MinMax.second = TempMinMax.second;
+      std::cout<<"\tCondition number >= "<<MinMax.second/MinMax.first<<std::endl;
+    }
+    delete event;
+    return;
+  }
+
   // Push event onto the list of event handlers.
   fEventHandlerList.push_back(event);
 
@@ -1248,4 +1265,47 @@ void EXORefitSignals::FillFromNoise(std::vector<double>& vec,
               fNoiseMulResult.begin() + (i+1)*fNoiseColumnLength,
               vec.begin() + i*ColLength);
   }
+}
+
+std::pair<double, double> EXORefitSignals::EstimateConditionNumber(EventHandler& event)
+{
+  // Stupid algorithm for finding the condition number -- just keep guessing vectors,
+  // and tracking the maximum and minimum value of |Ax|/|x|.
+  // The condition number is defined as max/min of that expression.
+  // The point here is to avoid solving Ax=b, since that's the whole challenge to begin with.
+  // Better might be to do a gradient-based search, instead of randomized brute force,
+  // but at the moment I don't know how many false optima there are in |Ax|/|x|.
+  assert(fNumVectorsInQueue == 0);
+  const size_t NumColumns = 100;
+
+  std::vector<double> RandomX;
+  RandomX.reserve(event.fColumnLength*NumColumns); // Avoid value initialization.
+  for(size_t i = 0; i < event.fColumnLength*NumColumns; i++) RandomX.push_back(double(rand())/RAND_MAX - 0.5);
+
+  std::vector<double> PreconRandomX = DoInvRPrecon(RandomX, event);
+  size_t RequestIndex = RequestNoiseMul(PreconRandomX, event.fColumnLength);
+  DoNoiseMultiplication();
+  std::vector<double> UnpreconRandomAX;
+  FillFromNoise(UnpreconRandomAX, NumColumns, event.fColumnLength, RequestIndex);
+  DoRestOfMultiplication(PreconRandomX, UnpreconRandomAX, event);
+  std::vector<double> PreconRandomAX = DoInvLPrecon(UnpreconRandomAX, event);
+
+  double Max, Min;
+  for(size_t i = 0; i < NumColumns; i++) {
+    double Norm_AX = std::inner_product(PreconRandomAX.begin() + i*event.fColumnLength,
+                                        PreconRandomAX.begin() + (i+1)*event.fColumnLength,
+                                        PreconRandomAX.begin() + i*event.fColumnLength,
+                                        double(0));
+    double Norm_X = std::inner_product(RandomX.begin() + i*event.fColumnLength,
+                                       RandomX.begin() + (i+1)*event.fColumnLength,
+                                       RandomX.begin() + i*event.fColumnLength,
+                                       double(0));
+    double Ratio = Norm_AX/Norm_X;
+    if(i == 0) Max = Min = Ratio;
+    else {
+      if(Ratio > Max) Max = Ratio;
+      if(Ratio < Min) Min = Ratio;
+    }
+  }
+  return std::make_pair(Min, Max);
 }
