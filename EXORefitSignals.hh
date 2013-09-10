@@ -105,6 +105,7 @@ class EXORefitSignals
   // The number corresponds to the *index* of the various channels, of course.
   std::string fNoiseFilename;
   std::vector<std::vector<double> > fNoiseCorrelations;
+  std::vector<double> fNoiseDiag;
   void FillNoiseCorrelations(const EXOEventData& ED);
 
   std::string fLightmapFilename;
@@ -195,6 +196,9 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   // If WHICH = 'A', do both.
   // All other values of WHICH result in an error.  (This is done to force compile-time optimization.)
   // In and out should only be equal if WHICH != 'A'.
+  // We also package the "preconditioning" matrix, so this actually does:
+  // (0                D^(-1/2)L)
+  // (trans(L)D^(-1/2) 0        )
   assert(WHICH == 'L' or WHICH == 'C' or WHICH == 'A');
   assert(WHICH == 'L' or WHICH == 'C' or &in[0] != &out[0]);
   bool Lagrange = (WHICH == 'L' or WHICH == 'A');
@@ -217,11 +221,11 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
         size_t Index1 = event.fColumnLength - (event.fWireModel.size()+1) + m;
         size_t Index2 = 2*fChannels.size()*f + channel_index*(f < fMaxF-fMinF ? 2 : 1);
         for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-          if(Lagrange) out[Index2] += modelWF[2*f]*in[Index1];
-          if(Constraint) out[Index1] += modelWF[2*f]*in[Index2];
+          if(Lagrange) out[Index2] += modelWF[2*f]*fNoiseDiag[Index2 % event.fColumnLength]*in[Index1];
+          if(Constraint) out[Index1] += modelWF[2*f]*fNoiseDiag[Index2 % event.fColumnLength]*in[Index2];
           if(f < fMaxF-fMinF) {
-            if(Lagrange) out[Index2+1] += modelWF[2*f+1]*in[Index1];
-            if(Constraint) out[Index1] += modelWF[2*f+1]*in[Index2+1];
+            if(Lagrange) out[Index2+1] += modelWF[2*f+1]*fNoiseDiag[(Index2+1)%event.fColumnLength]*in[Index1];
+            if(Constraint) out[Index1] += modelWF[2*f+1]*fNoiseDiag[(Index2+1)%event.fColumnLength]*in[Index2+1];
           }
           Index1 += event.fColumnLength;
           Index2 += event.fColumnLength;
@@ -236,11 +240,11 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
       size_t Index1 = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
       size_t Index2 = event.fColumnLength - 1;
       for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-        if(Constraint) out[Index2] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*in[Index1];
-        if(Lagrange) out[Index1] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*in[Index2];
+        if(Constraint) out[Index2] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*fNoiseDiag[Index1%event.fColumnLength]*in[Index1];
+        if(Lagrange) out[Index1] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*fNoiseDiag[Index1%event.fColumnLength]*in[Index2];
         if(f < fMaxF-fMinF) {
-          if(Constraint) out[Index2] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*in[Index1+1];
-          if(Lagrange) out[Index1+1] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*in[Index2];
+          if(Constraint) out[Index2] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*fNoiseDiag[(Index1+1)%event.fColumnLength]*in[Index1+1];
+          if(Lagrange) out[Index1+1] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*fNoiseDiag[(Index1+1)%event.fColumnLength]*in[Index2];
         }
         Index1 += event.fColumnLength;
         Index2 += event.fColumnLength;
