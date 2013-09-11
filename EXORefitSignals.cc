@@ -59,7 +59,7 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
 {
   fWFEvent = NULL;
   fWFTree.SetBranchAddress("EventBranch", &fWFEvent);
-  fWatch_TotalTime.Start();
+  fWatches["Time from construction to destruction"].Start();
 }
 
 void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
@@ -71,7 +71,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // against that is small.
   // For the future, might consider whether we can rearrange EXONoiseCorrelations to be
   // more convenient for this.
-  fWatch_FillNoise.Start(false);
+  fWatches["FillNoiseCorrelations"].Start(false);
 
   // Get the channel map.
   const EXOChannelMap& ChannelMap = GetChanMapForHeader(ED.fEventHeader);
@@ -86,7 +86,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
 
   // If the channel mapping is unchanged, do nothing.
   if(ChannelsToUse == fChannels) {
-    fWatch_FillNoise.Stop();
+    fWatches["FillNoiseCorrelations"].Stop();
     return;
   }
 
@@ -180,7 +180,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     }
   }
 
-  fWatch_FillNoise.Stop();
+  fWatches["FillNoiseCorrelations"].Stop();
 }
 
 int EXORefitSignals::Initialize()
@@ -244,13 +244,7 @@ int EXORefitSignals::Initialize()
   fWireDeposit /= MaxVal;
   fWireInduction /= MaxVal;
 
-  // Initialize stopwatches too.
-  fWatch_BiCGSTAB.Reset();
-  fWatch_NoiseMul.Reset();
-  fWatch_RestMul.Reset();
-  fWatch_BiCGSTAB_part1.Reset();
-  fWatch_BiCGSTAB_part2.Reset();
-  fWatch_FillNoise.Reset();
+  // Initialize counters too.
   fNumEventsHandled = 0;
   fNumSignalsHandled = 0;
   fTotalIterationsDone = 0;
@@ -260,25 +254,22 @@ int EXORefitSignals::Initialize()
 EXORefitSignals::~EXORefitSignals()
 {
   // Print statistics and timing information.
-  fWatch_TotalTime.Stop();
+
+  // Stop any watches which are still going.
+  for(std::map<std::string, TStopwatch>::iterator it = fWatches.begin(); it != fWatches.end(); it++) {
+    it->second.Stop();
+  }
 
   std::cout<<fNumEventsHandled<<" events were handled by signal refitting."<<std::endl;
   std::cout<<"Those events contained a total of "<<fNumSignalsHandled<<" signals to refit."<<std::endl;
   std::cout<<fTotalIterationsDone<<" iterations were required."<<std::endl;
-  std::cout<<"Multiplying by noise blocks:"<<std::endl;
-  fWatch_NoiseMul.Print();
-  std::cout<<"Total time spent in BiCGSTAB iterations (excluding noise blocks):"<<std::endl;
-  fWatch_BiCGSTAB.Print();
-  std::cout<<"Multiplying by the rest of the matrix entries:"<<std::endl;
-  fWatch_RestMul.Print();
-  std::cout<<"Part one of iterations (exploiting V = AP):"<<std::endl;
-  fWatch_BiCGSTAB_part1.Print();
-  std::cout<<"Part two of iterations (exploiting T = AS):"<<std::endl;
-  fWatch_BiCGSTAB_part2.Print();
-  std::cout<<"Setting up noise correlations:"<<std::endl;
-  fWatch_FillNoise.Print();
-  std::cout<<"Total time between construction and destruction:"<<std::endl;
-  fWatch_TotalTime.Print();
+  std::cout<<"Timings follow."<<std::endl;
+
+  // Print all watch information.
+  for(std::map<std::string, TStopwatch>::iterator it = fWatches.begin(); it != fWatches.end(); it++) {
+    std::cout<<it->first<<":"<<std::endl;
+    it->second.Print();
+  }
 }
 
 EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
@@ -847,7 +838,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   // Electronic Transactions on Numerical Analysis, vol 16, 129-142 (2003).
   // "A BLOCK VERSION OF BICGSTAB FOR LINEAR SYSTEMS WITH MULTIPLE RIGHT-HAND SIDES"
   // A. EL GUENNOUNI, K. JBILOU, AND H. SADOK.
-  fWatch_BiCGSTAB.Start(false);
+  fWatches["All of BiCGSTAB"].Start(false);
   lapack_int ret;
 
   if(event.fR.size() == 0) {
@@ -875,13 +866,13 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     event.fprecon_tmp = DoInvRPrecon(event.fP, event);
     // Now we want V <- AP, so request a multiplication by P.
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
-    fWatch_BiCGSTAB.Stop();
+    fWatches["All of BiCGSTAB"].Stop();
     return false;
   }
   else if(event.fV.size() == 0) {
     // At the beginning of the iteration, we just computed V = AP.
     fTotalIterationsDone++;
-    fWatch_BiCGSTAB_part1.Start(false);
+    fWatches["BiCGSTAB (using V = AP)"].Start(false);
     FillFromNoise(event.fV, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
@@ -918,33 +909,40 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Remember to apply preconditioner here too.
     event.fprecon_tmp = DoInvRPrecon(event.fR, event);
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
-    fWatch_BiCGSTAB_part1.Stop();
-    fWatch_BiCGSTAB.Stop();
+    fWatches["BiCGSTAB (using V = AP)"].Stop();
+    fWatches["All of BiCGSTAB"].Stop();
     return false;
   }
   else {
     // We're in the second half of the iteration, where T was just computed.
-    fWatch_BiCGSTAB_part2.Start(false);
+    fWatches["BiCGSTAB (using T = AS)"].Start(false);
+    fWatches["BiCGSTAB (using T = AS; filling T)"].Start(false);
     std::vector<double> T;
     FillFromNoise(T, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, T, event);
     // Finish preconditioner.
     T = DoInvLPrecon(T, event);
+    fWatches["BiCGSTAB (using T = AS; filling T)"].Stop();
     // Compute omega.
+    fWatches["BiCGSTAB (using T = AS; omega)"].Start(false);
     double omega = std::inner_product(T.begin(), T.end(), event.fR.begin(), double(0)) /
                    std::inner_product(T.begin(), T.end(), T.begin(), double(0));
+    fWatches["BiCGSTAB (using T = AS; omega)"].Stop();
     // Modify X.
+    fWatches["BiCGSTAB (using T = AS; Updating X)"].Start(false);
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
                 1, &event.fP[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
                 1, &event.fX[0], event.fColumnLength);
     for(size_t i = 0; i < event.fX.size(); i++) event.fX[i] += omega*event.fR[i];
+    fWatches["BiCGSTAB (using T = AS; Updating X)"].Stop();
     // Modify R.
     for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] -= omega*T[i];
     // Check if we should conclude here -- R is the residual matrix.
     // Note: for the benefit of preconditioning comparison studies, I will currently terminate based on
     // the unpreconditioned residual.  That may be the wrong thing to do down the road.
+    fWatches["BiCGSTAB (using T = AS; evaluating norms)"].Start(false);
     double WorstNorm = 0;
     std::vector<double> R_unprec = DoLPrecon(event.fR, event);
     for(size_t col = 0; col <= event.fWireModel.size(); col++) {
@@ -958,12 +956,14 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       std::cout<<"Column "<<col<<" has norm "<<Norm<<std::endl;
       if(Norm > WorstNorm) WorstNorm = Norm;
     }
+    fWatches["BiCGSTAB (using T = AS; evaluating norms)"].Stop();
     if(WorstNorm < fRThreshold*fRThreshold) {
-      fWatch_BiCGSTAB_part2.Stop();
-      fWatch_BiCGSTAB.Stop();
+      fWatches["BiCGSTAB (using T = AS)"].Stop();
+      fWatches["All of BiCGSTAB"].Stop();
       return true;
     }
     // Now compute beta, solving R0hat_V beta = -R0hat_T
+    fWatches["BiCGSTAB (using T = AS; computing beta)"].Start(false);
     std::vector<double> Beta((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
@@ -975,7 +975,9 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                          &event.fR0hat_V_pivot[0],
                          &Beta[0], event.fWireModel.size()+1);
     if(ret != 0) LogEXOMsg("Solving failed", EEAlert);
+    fWatches["BiCGSTAB (using T = AS; computing beta)"].Stop();
     // Update P.  Overwrite T for temporary work.
+    fWatches["BiCGSTAB (using T = AS; updating P)"].Start(false);
     T = event.fR;
     for(size_t i = 0; i < event.fP.size(); i++) event.fP[i] -= omega*event.fV[i];
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
@@ -983,6 +985,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 1, &event.fP[0], event.fColumnLength, &Beta[0], event.fWireModel.size() + 1,
                 1, &T[0], event.fColumnLength);
     std::swap(T, event.fP);
+    fWatches["BiCGSTAB (using T = AS; updating P)"].Stop();
     // Clear vectors in event which are no longer needed -- this helps us keep track of where we are.
     event.fV.clear();
     event.fAlpha.clear();
@@ -991,8 +994,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // And request AP.  Remember preconditioner.
     event.fprecon_tmp = DoInvRPrecon(event.fP, event);
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
-    fWatch_BiCGSTAB_part2.Stop();
-    fWatch_BiCGSTAB.Stop();
+    fWatches["BiCGSTAB (using T = AS)"].Stop();
+    fWatches["All of BiCGSTAB"].Stop();
     return false;
   }
 }
@@ -1003,10 +1006,10 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
 {
   // After noise terms have already been handled, deal with all of the others.
   // This should not be the bottleneck.
-  fWatch_RestMul.Start(false);
+  fWatches["DoRestOfMultiplication"].Start(false);
   DoPoissonMultiplication(in, out, event);
   DoLagrangeAndConstraintMul<'A'>(in, out, event);
-  fWatch_RestMul.Stop();
+  fWatches["DoRestOfMultiplication"].Stop();
 }
 
 void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
@@ -1053,7 +1056,7 @@ void EXORefitSignals::DoNoiseMultiplication()
   fNoiseMulResult.assign(fNoiseMulQueue.size(), 0); // Probably don't need to fill with 0.
 
   // Do the multiplication -- one call for every frequency.
-  fWatch_NoiseMul.Start(false); // Don't count vector allocation.
+  fWatches["DoNoiseMultiplication"].Start(false); // Don't count vector allocation.
   for(size_t f = 0; f <= fMaxF - fMinF; f++) {
     size_t StartIndex = 2*fChannels.size()*f;
     size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
@@ -1062,7 +1065,7 @@ void EXORefitSignals::DoNoiseMultiplication()
                 1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], fNoiseColumnLength,
                 0, &fNoiseMulResult[StartIndex], fNoiseColumnLength);
   }
-  fWatch_NoiseMul.Stop();
+  fWatches["DoNoiseMultiplication"].Stop();
 
   // Clean up, to be ready for the next call.
   fNoiseMulQueue.clear(); // Hopefully doesn't free memory, since I'll need it again.
