@@ -1074,6 +1074,7 @@ void EXORefitSignals::DoNoiseMultiplication()
 std::vector<double> EXORefitSignals::DoInvLPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K1_inv.
+  fWatches["DoInvLPrecon"].Start(false);
   std::vector<double> out = in;
   for(size_t i = 0; i < out.size(); i++) {
     size_t imod = i % event.fColumnLength;
@@ -1090,12 +1091,14 @@ std::vector<double> EXORefitSignals::DoInvLPrecon(std::vector<double>& in, Event
               1, &event.fPreconX[0], event.fWireModel.size()+1,
               &out[fNoiseColumnLength], event.fColumnLength);
   // out = {{v1} {Inv(trans(X))(trans(L)D^(-1)v1 - v2)}}.
+  fWatches["DoInvLPrecon"].Stop();
   return out;
 }
 
 std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K2_inv.
+  fWatches["DoInvRPrecon"].Start(false);
   std::vector<double> out(in.size(), 0);
   for(size_t i = 0; i < in.size(); i++) {
     size_t imod = i % event.fColumnLength;
@@ -1110,12 +1113,14 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
     size_t imod = i % event.fColumnLength;
     if(imod < fNoiseColumnLength) out[i] = in[i] - out[i]/std::sqrt(fNoiseDiag[imod]);
   } // out = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
+  fWatches["DoInvRPrecon"].Stop();
   return out;
 }
 
 std::vector<double> EXORefitSignals::DoLPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K1.
+  fWatches["DoLPrecon"].Start(false);
   std::vector<double> out = in;
   cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasTrans, CblasNonUnit,
               event.fWireModel.size()+1, event.fWireModel.size()+1,
@@ -1130,12 +1135,14 @@ std::vector<double> EXORefitSignals::DoLPrecon(std::vector<double>& in, EventHan
     size_t imod = i % event.fColumnLength;
     if(imod < fNoiseColumnLength) out[i] = in[i];
   } // out = {{v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
+  fWatches["DoLPrecon"].Stop();
   return out;
 }
 
 std::vector<double> EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K2.
+  fWatches["DoRPrecon"].Start(false);
   std::vector<double> out(in.size(), 0);
   for(size_t i = 0; i < out.size(); i++) {
     size_t imod = i % event.fColumnLength;
@@ -1150,6 +1157,7 @@ std::vector<double> EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHan
     size_t imod = i % event.fColumnLength;
     if(imod < fNoiseColumnLength) out[i] = in[i] + out[i]/std::sqrt(fNoiseDiag[imod]);
   } // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
+  fWatches["DoRPrecon"].Stop();
   return out;
 }
 
@@ -1160,6 +1168,7 @@ size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
   // Return value indicates where to retrieve results.
   assert(fNoiseColumnLength <= ColLength);
   assert(vec.size() % ColLength == 0);
+  fWatches["RequestNoiseMul"].Start(false);
 
   size_t NumCols = vec.size() / ColLength;
   size_t InitSize = fNoiseMulQueue.size();
@@ -1170,6 +1179,7 @@ size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
                           vec.begin() + i*ColLength + fNoiseColumnLength);
   }
   fNumVectorsInQueue += NumCols;
+  fWatches["RequestNoiseMul"].Stop();
   return InitSize;
 }
 
@@ -1183,6 +1193,7 @@ void EXORefitSignals::FillFromNoise(std::vector<double>& vec,
   assert(fNoiseColumnLength <= ColLength);
   assert(ResultIndex % fNoiseColumnLength == 0);
   assert(ResultIndex + NumCols*fNoiseColumnLength <= fNoiseMulResult.size());
+  fWatches["FillFromNoise"].Start(false);
 
   vec.assign(NumCols*ColLength, 0);
   for(size_t i = 0; i < NumCols; i++) {
@@ -1190,6 +1201,8 @@ void EXORefitSignals::FillFromNoise(std::vector<double>& vec,
               fNoiseMulResult.begin() + ResultIndex + (i+1)*fNoiseColumnLength,
               vec.begin() + i*ColLength);
   }
+
+  fWatches["FillFromNoise"].Stop();
 }
 
 std::pair<double, double> EXORefitSignals::EstimateConditionNumber(EventHandler& event)
