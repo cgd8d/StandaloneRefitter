@@ -37,6 +37,8 @@
 #include "TArrayI.h"
 #include "TH3D.h"
 #include "TGraph.h"
+#include "MKL_adaptors.hh"
+#include "mkl_trans.h"
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -1088,17 +1090,17 @@ std::vector<double> EXORefitSignals::DoInvLPrecon(std::vector<double>& in, Event
 {
   // Multiply by K1_inv.
   fWatches["DoInvLPrecon"].Start(false);
-  std::vector<double> out = in;
-  for(size_t i = 0; i < out.size(); i++) {
-    size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] = in[i] * fInvSqrtNoiseDiag[imod];
-    else out[i] = -out[i];
-  } // out = {{D^(-1/2) v1} {-v2}}
+  std::vector<double> out(in.size(), 0);
+  ddiamm(fNoiseColumnLength, in.size()/event.fColumnLength, fNoiseColumnLength,
+         &fInvSqrtNoiseDiag[0], &in[0], event.fColumnLength,
+         &out[0], event.fColumnLength); // out = {{D^(-1/2) v1} {0}}
+  mkl_domatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
+                -1, &in[fNoiseColumnLength], event.fColumnLength,
+                &out[fNoiseColumnLength], event.fColumnLength); // out = {{D^(-1/2) v1} {-v2}}
   DoLagrangeAndConstraintMul<'C'>(out, out, event); // out = {{D^(-1/2)v1} {trans(L)D^(-1/2)v1 - v2}}
-  for(size_t i = 0; i < in.size(); i++) {
-    size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] = in[i];
-  } // out = {{v1} {trans(L)D^(-1/2)v1 - v2}}
+  mkl_domatcopy('C', 'N', fNoiseColumnLength, event.fWireModel.size()+1,
+                1, &in[0], event.fColumnLength,
+                &out[0], event.fColumnLength); // out = {{v1} {trans(L)D^(-1/2)v1 - v2}}
   cblas_dtrsm(CblasColMajor, CblasLeft, CblasUpper, CblasTrans, CblasNonUnit,
               event.fWireModel.size()+1, event.fWireModel.size()+1,
               1, &event.fPreconX[0], event.fWireModel.size()+1,
