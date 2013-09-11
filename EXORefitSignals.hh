@@ -107,6 +107,8 @@ class EXORefitSignals
   std::vector<std::vector<double> > fNoiseCorrelations;
   std::vector<double> fNoiseDiag;
   std::vector<double> fSqrtNoiseDiag;
+  std::vector<double> fInvNoiseDiag;
+  std::vector<double> fInvSqrtNoiseDiag;
   void FillNoiseCorrelations(const EXOEventData& ED);
 
   std::string fLightmapFilename;

@@ -170,7 +170,11 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
 
   // Precompute useful transformations of the noise diagonal.
   fSqrtNoiseDiag.resize(fNoiseDiag.size());
-  std::transform(fNoiseDiag.begin(), fNoiseDiag.end(), fSqrtNoiseDiag.begin(), (double(*)(double))std::sqrt);
+  for(size_t i = 0; i < fNoiseDiag.size(); i++) fSqrtNoiseDiag[i] = std::sqrt(fNoiseDiag[i]);
+  fInvNoiseDiag.resize(fNoiseDiag.size());
+  for(size_t i = 0; i < fNoiseDiag.size(); i++) fInvNoiseDiag[i] = double(1)/fNoiseDiag[i];
+  fInvSqrtNoiseDiag.resize(fNoiseDiag.size());
+  for(size_t i = 0; i < fNoiseDiag.size(); i++) fInvSqrtNoiseDiag[i] = double(1)/fSqrtNoiseDiag[i];
 
   // Go ahead and precondition the noise matrices.  This should improve the accuracy of multiplications.
   // So, N -> D^(-1/2) N D^(-1/2).
@@ -179,8 +183,8 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     size_t DiagIndex = 2*fChannels.size()*(f-fMinF);
     for(size_t row = 0; row < BlockSize; row++) {
       for(size_t col = 0; col < BlockSize; col++) {
-        fNoiseCorrelations[f-fMinF][row + BlockSize*col] /= fSqrtNoiseDiag[DiagIndex + row];
-        fNoiseCorrelations[f-fMinF][row + BlockSize*col] /= fSqrtNoiseDiag[DiagIndex + col];
+        fNoiseCorrelations[f-fMinF][row + BlockSize*col] *= fInvSqrtNoiseDiag[DiagIndex + row];
+        fNoiseCorrelations[f-fMinF][row + BlockSize*col] *= fInvSqrtNoiseDiag[DiagIndex + col];
       }
     }
   }
@@ -768,7 +772,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     event->fX = DoInvRPrecon(event->fX, *event);
     for(size_t i = 0; i < event->fX.size(); i++) {
       size_t imod = i % event->fColumnLength;
-      if(imod < fNoiseColumnLength) event->fX[i] /= fSqrtNoiseDiag[imod];
+      if(imod < fNoiseColumnLength) event->fX[i] *= fInvSqrtNoiseDiag[imod];
     }
 
     // We need to compute denoised signals.
@@ -1035,20 +1039,20 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
       double CommonFactor = 0;
       for(size_t g = 0; g <= fMaxF - fMinF; g++) {
         size_t InIndex = n*event.fColumnLength + 2*fChannels.size()*g + k*(g < fMaxF-fMinF ? 2 : 1);
-        CommonFactor += event.fmodel_realimag[2*g] * in[InIndex] /
-                        fSqrtNoiseDiag[InIndex % event.fColumnLength];
-        if(g < fMaxF-fMinF) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+1] /
-                                            fSqrtNoiseDiag[(InIndex+1) % event.fColumnLength];
+        CommonFactor += event.fmodel_realimag[2*g] * in[InIndex] *
+                        fInvSqrtNoiseDiag[InIndex % event.fColumnLength];
+        if(g < fMaxF-fMinF) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+1] *
+                                            fInvSqrtNoiseDiag[(InIndex+1) % event.fColumnLength];
       }
       CommonFactor *= ChannelFactors;
 
       // Now actually transfer the changes to the out vector.
       for(size_t f = 0; f <= fMaxF - fMinF; f++) {
         size_t OutIndex = n*event.fColumnLength + 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
-        out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] /
-                         fSqrtNoiseDiag[OutIndex % event.fColumnLength];
-        if(f < fMaxF-fMinF) out[OutIndex+1] += CommonFactor * event.fmodel_realimag[2*f+1] /
-                                               fSqrtNoiseDiag[(OutIndex+1) % event.fColumnLength];
+        out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] *
+                         fInvSqrtNoiseDiag[OutIndex % event.fColumnLength];
+        if(f < fMaxF-fMinF) out[OutIndex+1] += CommonFactor * event.fmodel_realimag[2*f+1] *
+                                               fInvSqrtNoiseDiag[(OutIndex+1) % event.fColumnLength];
       }
     }
   } // End Poisson terms.
@@ -1087,7 +1091,7 @@ std::vector<double> EXORefitSignals::DoInvLPrecon(std::vector<double>& in, Event
   std::vector<double> out = in;
   for(size_t i = 0; i < out.size(); i++) {
     size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] = in[i] / fSqrtNoiseDiag[imod];
+    if(imod < fNoiseColumnLength) out[i] = in[i] * fInvSqrtNoiseDiag[imod];
     else out[i] = -out[i];
   } // out = {{D^(-1/2) v1} {-v2}}
   DoLagrangeAndConstraintMul<'C'>(out, out, event); // out = {{D^(-1/2)v1} {trans(L)D^(-1/2)v1 - v2}}
@@ -1120,7 +1124,7 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
   DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{LX^(-1)v2} {X^(-1)v2}}
   for(size_t i = 0; i < out.size(); i++) {
     size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] = in[i] - out[i]/fSqrtNoiseDiag[imod];
+    if(imod < fNoiseColumnLength) out[i] = in[i] - out[i]*fInvSqrtNoiseDiag[imod];
   } // out = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
   fWatches["DoInvRPrecon"].Stop();
   return out;
@@ -1137,7 +1141,7 @@ std::vector<double> EXORefitSignals::DoLPrecon(std::vector<double>& in, EventHan
               &out[fNoiseColumnLength], event.fColumnLength); // out = {{v1} {-trans(X)v2}}
   for(size_t i = 0; i < out.size(); i++) {
     size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] /= fSqrtNoiseDiag[imod];
+    if(imod < fNoiseColumnLength) out[i] *= fInvSqrtNoiseDiag[imod];
   } // out = {{D^(-1/2)v1} {-trans(X)v2}}
   DoLagrangeAndConstraintMul<'C'>(out, out, event); // out = {{D^(-1/2)v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
   for(size_t i = 0; i < out.size(); i++) {
@@ -1164,7 +1168,7 @@ std::vector<double> EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHan
               &out[fNoiseColumnLength], event.fColumnLength); // out = {{Lv2} {Xv2}}
   for(size_t i = 0; i < out.size(); i++) {
     size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] = in[i] + out[i]/fSqrtNoiseDiag[imod];
+    if(imod < fNoiseColumnLength) out[i] = in[i] + out[i]*fInvSqrtNoiseDiag[imod];
   } // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
   fWatches["DoRPrecon"].Stop();
   return out;
