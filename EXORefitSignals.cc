@@ -1011,8 +1011,12 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
   // After noise terms have already been handled, deal with all of the others.
   // This should not be the bottleneck.
   fWatches["DoRestOfMultiplication"].Start(false);
+  fWatches["DoRestOfMultiplication (Poisson)"].Start(false);
   DoPoissonMultiplication(in, out, event);
+  fWatches["DoRestOfMultiplication (Poisson)"].Stop();
+  fWatches["DoRestOfMultiplication (Lagrange and Constraint)"].Start(false);
   DoLagrangeAndConstraintMul<'A'>(in, out, event);
+  fWatches["DoRestOfMultiplication (Lagrange and Constraint)"].Stop();
   fWatches["DoRestOfMultiplication"].Stop();
 }
 
