@@ -1091,7 +1091,7 @@ std::vector<double> EXORefitSignals::DoInvLPrecon(std::vector<double>& in, Event
   // Multiply by K1_inv.
   fWatches["DoInvLPrecon"].Start(false);
   std::vector<double> out(in.size(), 0);
-  ddiamm(fNoiseColumnLength, in.size()/event.fColumnLength, fNoiseColumnLength,
+  ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
          &fInvSqrtNoiseDiag[0], &in[0], event.fColumnLength,
          &out[0], event.fColumnLength); // out = {{D^(-1/2) v1} {0}}
   mkl_domatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
@@ -1115,19 +1115,27 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
   // Multiply by K2_inv.
   fWatches["DoInvRPrecon"].Start(false);
   std::vector<double> out(in.size(), 0);
-  for(size_t i = 0; i < in.size(); i++) {
-    size_t imod = i % event.fColumnLength;
-    if(imod >= fNoiseColumnLength) out[i] = in[i];
-  }
+  mkl_domatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
+                1, &in[fNoiseColumnLength], event.fColumnLength,
+                &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {v2}}
   cblas_dtrsm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
               event.fWireModel.size()+1, event.fWireModel.size()+1,
               1, &event.fPreconX[0], event.fWireModel.size()+1,
               &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {X^(-1)v2}}
   DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{LX^(-1)v2} {X^(-1)v2}}
-  for(size_t i = 0; i < out.size(); i++) {
-    size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] = in[i] - out[i]*fInvSqrtNoiseDiag[imod];
-  } // out = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
+
+  // Using MKL, diamm and omatadd are both out-of-place.  So, provide a static workspace to use.
+  // This at least should prevent frequent reallocations.
+  static std::vector<double> Workspace;
+  Workspace.resize(fNoiseColumnLength*(event.fWireModel.size()+1));
+
+  ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
+         &fInvSqrtNoiseDiag[0], &out[0], event.fColumnLength,
+         &Workspace[0], fNoiseColumnLength); // Workspace = D^(-1/2)LX^(-1)v2
+  MKL_Domatadd('C', 'N', 'N', fNoiseColumnLength, event.fWireModel.size()+1,
+               -1, &Workspace[0], fNoiseColumnLength,
+               1, &in[0], event.fColumnLength,
+               &out[0], event.fColumnLength); // out = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
   fWatches["DoInvRPrecon"].Stop();
   return out;
 }
