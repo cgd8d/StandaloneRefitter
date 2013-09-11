@@ -1184,8 +1184,8 @@ void EXORefitSignals::FillFromNoise(std::vector<double>& vec,
 
   vec.assign(NumCols*ColLength, 0);
   for(size_t i = 0; i < NumCols; i++) {
-    std::copy(fNoiseMulResult.begin() +  i   *fNoiseColumnLength,
-              fNoiseMulResult.begin() + (i+1)*fNoiseColumnLength,
+    std::copy(fNoiseMulResult.begin() + ResultIndex +  i   *fNoiseColumnLength,
+              fNoiseMulResult.begin() + ResultIndex + (i+1)*fNoiseColumnLength,
               vec.begin() + i*ColLength);
   }
 }
