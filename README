@@ -12,6 +12,13 @@ Basic plan:  the class should have two matrices (column-major), one of which is 
 
 Current work:  I've now got a basic preconditioner which is giving convergence on a small sample, for wire+apd.  This is big progress.  Next things which need to happen (not all sequential):
 
+OK -- near-term goals:
+* Improve profiling and track down why the rest of BiCGSTAB is taking 2/3 of program time.
+* Do processing to ensure wire+apd code is producing reasonable results.
+* Start tracking down proper thresholds to use.
+	Including, preconditioned vs unpreconditioned threshold.
+	For now, use all noise correlations; but we'd also like to see wires and apds separately.
+
 * Improve code quality.
 * Updated profiling information.
 * Add options to do eg. APDs-only.
