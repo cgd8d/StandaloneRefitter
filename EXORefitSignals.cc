@@ -953,7 +953,6 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
         if(i < fNoiseColumnLength) Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i]*fNoiseDiag[i];
         else Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i];
       }
-      std::cout<<"Column "<<col<<" has norm "<<Norm<<std::endl;
       if(Norm > WorstNorm) WorstNorm = Norm;
     }
     fWatches["BiCGSTAB (using T = AS; evaluating norms)"].Stop();
