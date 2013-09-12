@@ -565,6 +565,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     return;
   }
 
+  fWatches["GenerateExpectedSignals"].Start(false);
   // Generate the expected light signal shape (normalized), given the time of the scintillation.
   // Alternate between real and imaginary parts, mimicking the variable ordering we use throughout.
   // Also drop the zero-frequency component (which isn't used)
@@ -634,6 +635,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
     event->fWireModel.push_back(std::make_pair(*sigIt, ModelForThisSignal));
   } // End loop over u-wire signals.
+  fWatches["GenerateExpectedSignals"].Stop();
 
   // For convenience, store the column length we'll be dealing with.
   event->fColumnLength = 2*fChannels.size()*(fMaxF-fMinF) + fChannels.size() + event->fWireModel.size() + 1;
@@ -776,6 +778,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   if(not event->fX.empty()) {
     // Undo preconditioning of X.
     event->fX = DoInvRPrecon(event->fX, *event);
+    fWatches["Finish computing denoised parameters"].Start(false);
     for(size_t i = 0; i < event->fX.size(); i++) {
       size_t imod = i % event->fColumnLength;
       if(imod < fNoiseColumnLength) event->fX[i] *= fInvSqrtNoiseDiag[imod];
@@ -835,6 +838,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
       sig->fDenoisedEnergy = Results[i]*GainCorrection*UWireScalingFactor;
     }
     ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
+    fWatches["Finish computing denoised parameters"].Stop();
   } // End setting of denoised energy signals.
 
   fOutputModule.ProcessEvent(ED);
@@ -853,7 +857,6 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   // Electronic Transactions on Numerical Analysis, vol 16, 129-142 (2003).
   // "A BLOCK VERSION OF BICGSTAB FOR LINEAR SYSTEMS WITH MULTIPLE RIGHT-HAND SIDES"
   // A. EL GUENNOUNI, K. JBILOU, AND H. SADOK.
-  fWatches["All of BiCGSTAB"].Start(false);
   lapack_int ret;
 
   if(event.fR.size() == 0) {
@@ -881,13 +884,11 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     event.fprecon_tmp = DoInvRPrecon(event.fP, event);
     // Now we want V <- AP, so request a multiplication by P.
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
-    fWatches["All of BiCGSTAB"].Stop();
     return false;
   }
   else if(event.fV.size() == 0) {
     // At the beginning of the iteration, we just computed V = AP.
     fTotalIterationsDone++;
-    fWatches["BiCGSTAB (using V = AP)"].Start(false);
     FillFromNoise(event.fV, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
@@ -926,44 +927,39 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Remember to apply preconditioner here too.
     event.fprecon_tmp = DoInvRPrecon(event.fR, event);
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
-    fWatches["BiCGSTAB (using V = AP)"].Stop();
-    fWatches["All of BiCGSTAB"].Stop();
     return false;
   }
   else {
     // We're in the second half of the iteration, where T was just computed.
-    fWatches["BiCGSTAB (using T = AS)"].Start(false);
-    fWatches["BiCGSTAB (using T = AS; filling T)"].Start(false);
     std::vector<double> T;
     FillFromNoise(T, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, T, event);
     // Finish preconditioner.
     T = DoInvLPrecon(T, event);
-    fWatches["BiCGSTAB (using T = AS; filling T)"].Stop();
     // Compute omega.
-    fWatches["BiCGSTAB (using T = AS; omega)"].Start(false);
+    fWatches["BiCGSTAB (omega)"].Start(false);
     double omega = std::inner_product(T.begin(), T.end(), event.fR.begin(), double(0)) /
                    std::inner_product(T.begin(), T.end(), T.begin(), double(0));
-    fWatches["BiCGSTAB (using T = AS; omega)"].Stop();
+    fWatches["BiCGSTAB (omega)"].Stop();
     // Modify X.
-    fWatches["BiCGSTAB (using T = AS; Updating X)"].Start(false);
+    fWatches["BiCGSTAB (Updating X)"].Start(false);
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
                 1, &event.fP[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
                 1, &event.fX[0], event.fColumnLength);
     for(size_t i = 0; i < event.fX.size(); i++) event.fX[i] += omega*event.fR[i];
-    fWatches["BiCGSTAB (using T = AS; Updating X)"].Stop();
+    fWatches["BiCGSTAB (Updating X)"].Stop();
     // Modify R.
-    fWatches["BiCGSTAB (using T = AS; update R)"].Start(false);
+    fWatches["BiCGSTAB (update R)"].Start(false);
     for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] -= omega*T[i];
-    fWatches["BiCGSTAB (using T = AS; update R)"].Stop();
+    fWatches["BiCGSTAB (update R)"].Stop();
     // Check if we should conclude here -- R is the residual matrix.
     // Note: for the benefit of preconditioning comparison studies, I will currently terminate based on
     // the unpreconditioned residual.  That may be the wrong thing to do down the road.
-    fWatches["BiCGSTAB (using T = AS; evaluating norms)"].Start(false);
     bool CanTerminate = true;
     std::vector<double> R_unprec = DoLPrecon(event.fR, event);
+    fWatches["BiCGSTAB (evaluating norms)"].Start(false);
     for(size_t col = 0; col <= event.fWireModel.size(); col++) {
       size_t ColIndex = col*event.fColumnLength;
       size_t NextCol = ColIndex + event.fColumnLength;
@@ -979,14 +975,10 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
         break;
       }
     }
-    fWatches["BiCGSTAB (using T = AS; evaluating norms)"].Stop();
-    if(CanTerminate) {
-      fWatches["BiCGSTAB (using T = AS)"].Stop();
-      fWatches["All of BiCGSTAB"].Stop();
-      return true;
-    }
+    fWatches["BiCGSTAB (evaluating norms)"].Stop();
+    if(CanTerminate) return true;
     // Now compute beta, solving R0hat_V beta = -R0hat_T
-    fWatches["BiCGSTAB (using T = AS; computing beta)"].Start(false);
+    fWatches["BiCGSTAB (computing beta)"].Start(false);
     std::vector<double> Beta((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
@@ -998,9 +990,9 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                          &event.fR0hat_V_pivot[0],
                          &Beta[0], event.fWireModel.size()+1);
     if(ret != 0) LogEXOMsg("Solving failed", EEAlert);
-    fWatches["BiCGSTAB (using T = AS; computing beta)"].Stop();
+    fWatches["BiCGSTAB (computing beta)"].Stop();
     // Update P.  Overwrite T for temporary work.
-    fWatches["BiCGSTAB (using T = AS; updating P)"].Start(false);
+    fWatches["BiCGSTAB (updating P)"].Start(false);
     T = event.fR;
     for(size_t i = 0; i < event.fP.size(); i++) event.fP[i] -= omega*event.fV[i];
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
@@ -1008,19 +1000,17 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 1, &event.fP[0], event.fColumnLength, &Beta[0], event.fWireModel.size() + 1,
                 1, &T[0], event.fColumnLength);
     std::swap(T, event.fP);
-    fWatches["BiCGSTAB (using T = AS; updating P)"].Stop();
+    fWatches["BiCGSTAB (updating P)"].Stop();
     // Clear vectors in event which are no longer needed -- this helps us keep track of where we are.
-    fWatches["BiCGSTAB (using T = AS; clear vectors)"].Start(false);
+    fWatches["BiCGSTAB (clear vectors)"].Start(false);
     event.fV.clear();
     event.fAlpha.clear();
     event.fR0hat_V_factors.clear();
     event.fR0hat_V_pivot.clear();
-    fWatches["BiCGSTAB (using T = AS; clear vectors)"].Stop();
+    fWatches["BiCGSTAB (clear vectors)"].Stop();
     // And request AP.  Remember preconditioner.
     event.fprecon_tmp = DoInvRPrecon(event.fP, event);
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
-    fWatches["BiCGSTAB (using T = AS)"].Stop();
-    fWatches["All of BiCGSTAB"].Stop();
     return false;
   }
 }
@@ -1031,14 +1021,8 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
 {
   // After noise terms have already been handled, deal with all of the others.
   // This should not be the bottleneck.
-  fWatches["DoRestOfMultiplication"].Start(false);
-  fWatches["DoRestOfMultiplication (Poisson)"].Start(false);
   DoPoissonMultiplication(in, out, event);
-  fWatches["DoRestOfMultiplication (Poisson)"].Stop();
-  fWatches["DoRestOfMultiplication (Lagrange and Constraint)"].Start(false);
   DoLagrangeAndConstraintMul<'A'>(in, out, event);
-  fWatches["DoRestOfMultiplication (Lagrange and Constraint)"].Stop();
-  fWatches["DoRestOfMultiplication"].Stop();
 }
 
 void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
@@ -1046,6 +1030,7 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
                                               EventHandler& event)
 {
   // Poisson terms for APD channels.
+  fWatches["DoPoissonMultiplication"].Start(false);
   for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) { // APD gangs
     double ChannelFactors = event.fExpectedEnergy_keV/fThoriumEnergy_keV;
     ChannelFactors *= GetGain(fChannels[k], event);
@@ -1075,6 +1060,7 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
       }
     }
   } // End Poisson terms.
+  fWatches["DoPoissonMultiplication"].Stop();
 }
 
 void EXORefitSignals::DoNoiseMultiplication()
@@ -1114,7 +1100,9 @@ std::vector<double> EXORefitSignals::DoInvLPrecon(std::vector<double>& in, Event
   mkl_domatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
                 -1, &in[fNoiseColumnLength], event.fColumnLength,
                 &out[fNoiseColumnLength], event.fColumnLength); // out = {{D^(-1/2) v1} {-v2}}
+  fWatches["DoInvLPrecon"].Stop();
   DoLagrangeAndConstraintMul<'C'>(out, out, event); // out = {{D^(-1/2)v1} {trans(L)D^(-1/2)v1 - v2}}
+  fWatches["DoInvLPrecon"].Start(false);
   mkl_domatcopy('C', 'N', fNoiseColumnLength, event.fWireModel.size()+1,
                 1, &in[0], event.fColumnLength,
                 &out[0], event.fColumnLength); // out = {{v1} {trans(L)D^(-1/2)v1 - v2}}
@@ -1139,7 +1127,9 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
               event.fWireModel.size()+1, event.fWireModel.size()+1,
               1, &event.fPreconX[0], event.fWireModel.size()+1,
               &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {X^(-1)v2}}
+  fWatches["DoInvRPrecon"].Stop();
   DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{LX^(-1)v2} {X^(-1)v2}}
+  fWatches["DoInvRPrecon"].Start(false);
 
   // Using MKL, diamm and omatadd are both out-of-place.
   // Use the static global workspace.
@@ -1171,7 +1161,9 @@ std::vector<double> EXORefitSignals::DoLPrecon(std::vector<double>& in, EventHan
   ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
          &fInvSqrtNoiseDiag[0], &in[0], event.fColumnLength,
          &out[0], event.fColumnLength); // out = {{D^(-1/2) v1} {-trans(X)v2}}
+  fWatches["DoLPrecon"].Stop();
   DoLagrangeAndConstraintMul<'C'>(out, out, event); // out = {{D^(-1/2)v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
+  fWatches["DoLPrecon"].Start(false);
   mkl_domatcopy('C', 'N', fNoiseColumnLength, event.fWireModel.size()+1,
                 1, &in[0], event.fColumnLength,
                 &out[0], event.fColumnLength); // out = {{v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
@@ -1187,7 +1179,9 @@ std::vector<double> EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHan
   mkl_domatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
                 1, &in[fNoiseColumnLength], event.fColumnLength,
                 &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {v2}}
+  fWatches["DoRPrecon"].Stop();
   DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{Lv2} {v2}}
+  fWatches["DoRPrecon"].Start(false);
   cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
               event.fWireModel.size()+1, event.fWireModel.size()+1,
               1, &event.fPreconX[0], event.fWireModel.size()+1,

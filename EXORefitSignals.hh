@@ -198,6 +198,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   // (trans(L)D^(-1/2) 0        )
   assert(WHICH == 'L' or WHICH == 'C' or WHICH == 'A');
   assert(WHICH == 'L' or WHICH == 'C' or &in[0] != &out[0]);
+  fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH)].Start(false);
   bool Lagrange = (WHICH == 'L' or WHICH == 'A');
   bool Constraint = (WHICH == 'C' or WHICH == 'A');
 
@@ -250,5 +251,6 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
       }
     }
   }
+  fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH)].Stop();
 }
 #endif
