@@ -175,12 +175,8 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   delete NoiseFile;
 
   // Precompute useful transformations of the noise diagonal.
-  fSqrtNoiseDiag.resize(fNoiseDiag.size());
-  for(size_t i = 0; i < fNoiseDiag.size(); i++) fSqrtNoiseDiag[i] = std::sqrt(fNoiseDiag[i]);
-  fInvNoiseDiag.resize(fNoiseDiag.size());
-  for(size_t i = 0; i < fNoiseDiag.size(); i++) fInvNoiseDiag[i] = double(1)/fNoiseDiag[i];
   fInvSqrtNoiseDiag.resize(fNoiseDiag.size());
-  for(size_t i = 0; i < fNoiseDiag.size(); i++) fInvSqrtNoiseDiag[i] = double(1)/fSqrtNoiseDiag[i];
+  for(size_t i = 0; i < fNoiseDiag.size(); i++) fInvSqrtNoiseDiag[i] = double(1)/std::sqrt(fNoiseDiag[i]);
 
   // Go ahead and precondition the noise matrices.  This should improve the accuracy of multiplications.
   // So, N -> D^(-1/2) N D^(-1/2).
