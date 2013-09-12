@@ -45,6 +45,10 @@
 #include <cstdlib>
 #include <algorithm>
 
+// Some functions just need a short-term place to put things in. (Eg. out-of-place MKL operations.)
+// This way, they reuse the memory and reduce the number of reallocations.
+static std::vector<double> Workspace;
+
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
                                  EXOTreeOutputModule& outputModule)
@@ -1124,9 +1128,8 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
               &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {X^(-1)v2}}
   DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{LX^(-1)v2} {X^(-1)v2}}
 
-  // Using MKL, diamm and omatadd are both out-of-place.  So, provide a static workspace to use.
-  // This at least should prevent frequent reallocations.
-  static std::vector<double> Workspace;
+  // Using MKL, diamm and omatadd are both out-of-place.
+  // Use the static global workspace.
   Workspace.resize(fNoiseColumnLength*(event.fWireModel.size()+1));
 
   ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
@@ -1144,20 +1147,21 @@ std::vector<double> EXORefitSignals::DoLPrecon(std::vector<double>& in, EventHan
 {
   // Multiply by K1.
   fWatches["DoLPrecon"].Start(false);
-  std::vector<double> out = in;
+  std::vector<double> out(in.size(), 0);
+  mkl_domatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
+                1, &in[fNoiseColumnLength], event.fColumnLength,
+                &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {v2}}
   cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasTrans, CblasNonUnit,
               event.fWireModel.size()+1, event.fWireModel.size()+1,
               -1, &event.fPreconX[0], event.fWireModel.size()+1,
-              &out[fNoiseColumnLength], event.fColumnLength); // out = {{v1} {-trans(X)v2}}
-  for(size_t i = 0; i < out.size(); i++) {
-    size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] *= fInvSqrtNoiseDiag[imod];
-  } // out = {{D^(-1/2)v1} {-trans(X)v2}}
+              &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {-trans(X)v2}}
+  ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
+         &fInvSqrtNoiseDiag[0], &in[0], event.fColumnLength,
+         &out[0], event.fColumnLength); // out = {{D^(-1/2) v1} {-trans(X)v2}}
   DoLagrangeAndConstraintMul<'C'>(out, out, event); // out = {{D^(-1/2)v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
-  for(size_t i = 0; i < out.size(); i++) {
-    size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] = in[i];
-  } // out = {{v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
+  mkl_domatcopy('C', 'N', fNoiseColumnLength, event.fWireModel.size()+1,
+                1, &in[0], event.fColumnLength,
+                &out[0], event.fColumnLength); // out = {{v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
   fWatches["DoLPrecon"].Stop();
   return out;
 }
@@ -1167,19 +1171,26 @@ std::vector<double> EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHan
   // Multiply by K2.
   fWatches["DoRPrecon"].Start(false);
   std::vector<double> out(in.size(), 0);
-  for(size_t i = 0; i < out.size(); i++) {
-    size_t imod = i % event.fColumnLength;
-    if(imod >= fNoiseColumnLength) out[i] = in[i];
-  } // out = {{0} {v2}}  
+  mkl_domatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
+                1, &in[fNoiseColumnLength], event.fColumnLength,
+                &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {v2}}
   DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{Lv2} {v2}}
   cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
               event.fWireModel.size()+1, event.fWireModel.size()+1,
               1, &event.fPreconX[0], event.fWireModel.size()+1,
               &out[fNoiseColumnLength], event.fColumnLength); // out = {{Lv2} {Xv2}}
-  for(size_t i = 0; i < out.size(); i++) {
-    size_t imod = i % event.fColumnLength;
-    if(imod < fNoiseColumnLength) out[i] = in[i] + out[i]*fInvSqrtNoiseDiag[imod];
-  } // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
+
+  // Using MKL, diamm and omatadd are both out-of-place.
+  // Use the static global workspace.
+  Workspace.resize(fNoiseColumnLength*(event.fWireModel.size()+1));
+
+  ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
+         &fInvSqrtNoiseDiag[0], &out[0], event.fColumnLength,
+         &Workspace[0], fNoiseColumnLength); // Workspace = D^(-1/2)Lv2
+  MKL_Domatadd('C', 'N', 'N', fNoiseColumnLength, event.fWireModel.size()+1,
+               1, &Workspace[0], fNoiseColumnLength,
+               1, &in[0], event.fColumnLength,
+               &out[0], event.fColumnLength); // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
   fWatches["DoRPrecon"].Stop();
   return out;
 }
