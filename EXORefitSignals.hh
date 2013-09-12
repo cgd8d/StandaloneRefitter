@@ -230,6 +230,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     }
   } // Done with Lagrange and constraint terms for wires.
   // Now, Lagrange and constraint terms for APDs.
+  fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH).append(", apds")].Start(false);
   for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
     double ExpectedYieldOnGang = event.fExpectedYieldPerGang.at(fChannels[k]);
     for(size_t f = 0; f <= fMaxF - fMinF; f++) {
@@ -248,6 +249,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
       }
     }
   }
+  fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH).append(", apds")].Stop();
   fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH)].Stop();
 }
 #endif
