@@ -45,10 +45,6 @@
 #include <cstdlib>
 #include <algorithm>
 
-// Some functions just need a short-term place to put things in. (Eg. out-of-place MKL operations.)
-// This way, they reuse the memory and reduce the number of reallocations.
-static std::vector<double> Workspace;
-
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
                                  EXOTreeOutputModule& outputModule)

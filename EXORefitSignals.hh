@@ -5,6 +5,7 @@
 #include "TStopwatch.h"
 #include "mkl_cblas.h"
 #include "mkl_lapacke.h"
+#include "mkl_vml_functions.h"
 #include <string>
 #include <vector>
 #include <map>
@@ -20,6 +21,10 @@ class EXOTreeOutputModule;
 class TH3D;
 class TGraph;
 class TTree;
+
+// Some functions just need a short-term place to put things in. (Eg. out-of-place MKL operations.)
+// This way, they reuse the memory and reduce the number of reallocations.
+static std::vector<double> Workspace;
 
 class EXORefitSignals
 {
@@ -230,23 +235,52 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     }
   } // Done with Lagrange and constraint terms for wires.
   // Now, Lagrange and constraint terms for APDs.
+  // This is where most of the time is spent, because we need to loop through all APD channels.
+  // Furthermore, the APD channels are grouped together, making this portion of the code more matrix-friendly.
+  // So, we exploit MKL as much as possible.
   fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH).append(", apds")].Start(false);
+  std::vector<double> ExpectedYields;
   for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
-    double ExpectedYieldOnGang = event.fExpectedYieldPerGang.at(fChannels[k]);
-    for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-      size_t Index1 = 2*fChannels.size()*f + k;
-      size_t Index2 = event.fColumnLength - 1;
-      const size_t DiagIndex = Index1;
-      for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-        if(Constraint) out[Index2] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*fNoiseDiag[DiagIndex]*in[Index1];
-        if(Lagrange) out[Index1] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*fNoiseDiag[DiagIndex]*in[Index2];
-        if(f < fMaxF-fMinF) {
-          if(Constraint) out[Index2] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*fNoiseDiag[DiagIndex+fChannels.size()]*in[Index1+fChannels.size()];
-          if(Lagrange) out[Index1+fChannels.size()] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*fNoiseDiag[DiagIndex+fChannels.size()]*in[Index2];
-        }
-        Index1 += event.fColumnLength;
-        Index2 += event.fColumnLength;
-      }
+    ExpectedYields.push_back(event.fExpectedYieldPerGang.at(fChannels[k]));
+  }
+  Workspace.resize(ExpectedYields.size());
+  for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+    size_t StartIndex = 2*fChannels.size()*f + fFirstAPDChannelIndex;
+
+    // Start with real blocks.
+    vdMul(ExpectedYields.size(), &ExpectedYields[0], &fNoiseDiag[StartIndex], &Workspace[0]);
+    if(Constraint) {
+      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                  1, event.fWireModel.size()+1, ExpectedYields.size(),
+                  event.fmodel_realimag[2*f], &Workspace[0], 1,
+                  &in[StartIndex], event.fColumnLength,
+                  1, &out[event.fColumnLength-1], event.fColumnLength);
+    }
+    if(Lagrange) {
+      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                  ExpectedYields.size(), event.fWireModel.size()+1, 1,
+                  event.fmodel_realimag[2*f], &Workspace[0], ExpectedYields.size(),
+                  &in[event.fColumnLength-1], event.fColumnLength,
+                  1, &out[StartIndex], event.fColumnLength);
+    }
+
+    // Now do imaginary blocks.
+    if(f == fMaxF - fMinF) continue;
+    StartIndex += fChannels.size();
+    vdMul(ExpectedYields.size(), &ExpectedYields[0], &fNoiseDiag[StartIndex], &Workspace[0]);
+    if(Constraint) {
+      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                  1, event.fWireModel.size()+1, ExpectedYields.size(),
+                  event.fmodel_realimag[2*f+1], &Workspace[0], 1,
+                  &in[StartIndex], event.fColumnLength,
+                  1, &out[event.fColumnLength-1], event.fColumnLength);
+    }
+    if(Lagrange) {
+      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                  ExpectedYields.size(), event.fWireModel.size()+1, 1,
+                  event.fmodel_realimag[2*f+1], &Workspace[0], ExpectedYields.size(),
+                  &in[event.fColumnLength-1], event.fColumnLength,
+                  1, &out[StartIndex], event.fColumnLength);
     }
   }
   fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH).append(", apds")].Stop();
