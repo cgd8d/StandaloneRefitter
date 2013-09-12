@@ -893,6 +893,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
     event.fV = DoInvLPrecon(event.fV, event);
     // Factorize fR0hat*V, so that we can solve equations using it twice.
+    fWatches["BiCGSTAB (using V = AP; stuff not counted elsewhere)"].Start(false);
     event.fR0hat_V_factors.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
@@ -920,6 +921,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
                 -1, &event.fV[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
                 1, &event.fR[0], event.fColumnLength);
+    fWatches["BiCGSTAB (using V = AP; stuff not counted elsewhere)"].Stop();
     // Now we desire T = AR (AS in paper).  Request a matrix multiplication, and return.
     // Remember to apply preconditioner here too.
     event.fprecon_tmp = DoInvRPrecon(event.fR, event);
@@ -953,7 +955,9 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     for(size_t i = 0; i < event.fX.size(); i++) event.fX[i] += omega*event.fR[i];
     fWatches["BiCGSTAB (using T = AS; Updating X)"].Stop();
     // Modify R.
+    fWatches["BiCGSTAB (using T = AS; update R)"].Start(false);
     for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] -= omega*T[i];
+    fWatches["BiCGSTAB (using T = AS; update R)"].Stop();
     // Check if we should conclude here -- R is the residual matrix.
     // Note: for the benefit of preconditioning comparison studies, I will currently terminate based on
     // the unpreconditioned residual.  That may be the wrong thing to do down the road.
@@ -1006,10 +1010,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     std::swap(T, event.fP);
     fWatches["BiCGSTAB (using T = AS; updating P)"].Stop();
     // Clear vectors in event which are no longer needed -- this helps us keep track of where we are.
+    fWatches["BiCGSTAB (using T = AS; clear vectors)"].Start(false);
     event.fV.clear();
     event.fAlpha.clear();
     event.fR0hat_V_factors.clear();
     event.fR0hat_V_pivot.clear();
+    fWatches["BiCGSTAB (using T = AS; clear vectors)"].Stop();
     // And request AP.  Remember preconditioner.
     event.fprecon_tmp = DoInvRPrecon(event.fP, event);
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
