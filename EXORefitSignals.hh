@@ -91,7 +91,6 @@ class EXORefitSignals
     // which is done using LAPACK.
     // We precondition with K1 as the first, and K2 as the second;
     // both are easy to invert.
-    std::vector<double> fDiag; // Diagonal entries of noise matrix.
     std::vector<double> fPreconX; // X, which is upper-triangular (unpacked).
 
     // Where in the result matrix can we expect to find the required result?

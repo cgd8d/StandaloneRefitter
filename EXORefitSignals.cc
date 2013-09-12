@@ -645,13 +645,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // where D is diagonal.  Thus, the approximation comes from ignoring noise cross-terms and
   // Poisson noise terms.
   // Haven't decided yet whether it's important to include Poisson terms on the diagonal; currently I don't.
-  event->fDiag.resize(fNoiseColumnLength);
-  for(size_t i = 0; i < fNoiseColumnLength; i++) {
-    size_t f = i/(2*fChannels.size());
-    size_t c = i%(2*fChannels.size());
-    size_t block = fChannels.size()*(f < fMaxF-fMinF ? 2 : 1);
-    event->fDiag[i] = fNoiseCorrelations[f][block*c + c];
-  }
   // Find X using trans(X)X = trans(L) D^(-1) L.
   std::vector<double> Temp1(event->fColumnLength * (event->fWireModel.size()+1), 0);
   std::vector<double> Temp2(event->fColumnLength * (event->fWireModel.size()+1), 0);
