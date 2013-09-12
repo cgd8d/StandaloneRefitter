@@ -217,12 +217,13 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
       for(size_t f = 0; f <= fMaxF - fMinF; f++) {
         size_t Index1 = event.fColumnLength - (event.fWireModel.size()+1) + m;
         size_t Index2 = 2*fChannels.size()*f + channel_index*(f < fMaxF-fMinF ? 2 : 1);
+        const size_t DiagIndex = Index2;
         for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-          if(Lagrange) out[Index2] += modelWF[2*f]*fNoiseDiag[Index2 % event.fColumnLength]*in[Index1];
-          if(Constraint) out[Index1] += modelWF[2*f]*fNoiseDiag[Index2 % event.fColumnLength]*in[Index2];
+          if(Lagrange) out[Index2] += modelWF[2*f]*fNoiseDiag[DiagIndex]*in[Index1];
+          if(Constraint) out[Index1] += modelWF[2*f]*fNoiseDiag[DiagIndex]*in[Index2];
           if(f < fMaxF-fMinF) {
-            if(Lagrange) out[Index2+1] += modelWF[2*f+1]*fNoiseDiag[(Index2+1)%event.fColumnLength]*in[Index1];
-            if(Constraint) out[Index1] += modelWF[2*f+1]*fNoiseDiag[(Index2+1)%event.fColumnLength]*in[Index2+1];
+            if(Lagrange) out[Index2+1] += modelWF[2*f+1]*fNoiseDiag[DiagIndex+1]*in[Index1];
+            if(Constraint) out[Index1] += modelWF[2*f+1]*fNoiseDiag[DiagIndex+1]*in[Index2+1];
           }
           Index1 += event.fColumnLength;
           Index2 += event.fColumnLength;
@@ -236,12 +237,13 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     for(size_t f = 0; f <= fMaxF - fMinF; f++) {
       size_t Index1 = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
       size_t Index2 = event.fColumnLength - 1;
+      const size_t DiagIndex = Index1;
       for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-        if(Constraint) out[Index2] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*fNoiseDiag[Index1%event.fColumnLength]*in[Index1];
-        if(Lagrange) out[Index1] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*fNoiseDiag[Index1%event.fColumnLength]*in[Index2];
+        if(Constraint) out[Index2] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*fNoiseDiag[DiagIndex]*in[Index1];
+        if(Lagrange) out[Index1] += event.fmodel_realimag[2*f]*ExpectedYieldOnGang*fNoiseDiag[DiagIndex]*in[Index2];
         if(f < fMaxF-fMinF) {
-          if(Constraint) out[Index2] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*fNoiseDiag[(Index1+1)%event.fColumnLength]*in[Index1+1];
-          if(Lagrange) out[Index1+1] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*fNoiseDiag[(Index1+1)%event.fColumnLength]*in[Index2];
+          if(Constraint) out[Index2] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*fNoiseDiag[DiagIndex+1]*in[Index1+1];
+          if(Lagrange) out[Index1+1] += event.fmodel_realimag[2*f+1]*ExpectedYieldOnGang*fNoiseDiag[DiagIndex+1]*in[Index2];
         }
         Index1 += event.fColumnLength;
         Index2 += event.fColumnLength;
