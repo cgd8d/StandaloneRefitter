@@ -1044,21 +1044,23 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
       // Compute the factors common to all frequencies.
       double CommonFactor = 0;
       for(size_t g = 0; g <= fMaxF - fMinF; g++) {
-        size_t InIndex = n*event.fColumnLength + 2*fChannels.size()*g + k*(g < fMaxF-fMinF ? 2 : 1);
+        size_t DiagIndex = 2*fChannels.size()*g + k*(g < fMaxF-fMinF ? 2 : 1);
+        size_t InIndex = n*event.fColumnLength + DiagIndex;
         CommonFactor += event.fmodel_realimag[2*g] * in[InIndex] *
-                        fInvSqrtNoiseDiag[InIndex % event.fColumnLength];
+                        fInvSqrtNoiseDiag[DiagIndex];
         if(g < fMaxF-fMinF) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+1] *
-                                            fInvSqrtNoiseDiag[(InIndex+1) % event.fColumnLength];
+                                            fInvSqrtNoiseDiag[DiagIndex+1];
       }
       CommonFactor *= ChannelFactors;
 
       // Now actually transfer the changes to the out vector.
       for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-        size_t OutIndex = n*event.fColumnLength + 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
+        size_t DiagIndex = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
+        size_t OutIndex = n*event.fColumnLength + DiagIndex;
         out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] *
-                         fInvSqrtNoiseDiag[OutIndex % event.fColumnLength];
+                         fInvSqrtNoiseDiag[DiagIndex];
         if(f < fMaxF-fMinF) out[OutIndex+1] += CommonFactor * event.fmodel_realimag[2*f+1] *
-                                               fInvSqrtNoiseDiag[(OutIndex+1) % event.fColumnLength];
+                                               fInvSqrtNoiseDiag[DiagIndex+1];
       }
     }
   } // End Poisson terms.
