@@ -702,7 +702,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   fNumSignalsHandled += event->fWireModel.size() + 1;
 
   // Now, while there are enough requests in the queue, satisfy those requests.
-  while(fNumVectorsInQueue > 300) {
+  while(fNumVectorsInQueue > 40) {
     DoNoiseMultiplication();
     std::list<EventHandler*>::iterator it = fEventHandlerList.begin();
     while(it != fEventHandlerList.end()) {
