@@ -26,10 +26,14 @@ Should be called like:
 
 int main(int argc, char** argv)
 {
-  if(argc != 4) {
+  if(argc < 4) {
     std::cout<<"Usage: ./Refit <InputProcessedFile> <InputWaveformFile> <OutputFile>"<<std::endl;
     std::exit(1);
   }
+  Long64_t StartEntry = 0;
+  if(argc >= 5) StartEntry = std::atol(argv[4]);
+  Long64_t NumEntries = 40;
+  if(argc >= 6) NumEntries = std::atol(argv[5]);
 
   EXOTreeInputModule InputModule;
   InputModule.SetFilename(argv[1]);
@@ -41,13 +45,12 @@ int main(int argc, char** argv)
   OutputModule.Initialize();
   OutputModule.BeginOfRun(NULL); // OK, fine -- shortcut here, I assume input has only one run.
 
-  int MaxEvents = 40; // Hard-code it for now.
   EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
   RefitSig.SetNoiseFilename("/global/u1/c/claytond/TestEXOAnalysisBuild/noise_manyruns_withuwires_100000.root");
   RefitSig.SetRThreshold(0.1);
   RefitSig.Initialize();
 
-  for(Long64_t entryNum = 0; entryNum < MaxEvents; entryNum++) {
+  for(Long64_t entryNum = StartEntry; entryNum < StartEntry + NumEntries; entryNum++) {
     EXOEventData* ED = InputModule.GetEvent(entryNum);
     if(ED == NULL) break;
     RefitSig.AcceptEvent(ED, entryNum);
