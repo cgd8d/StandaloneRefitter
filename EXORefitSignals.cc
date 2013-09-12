@@ -958,20 +958,25 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Note: for the benefit of preconditioning comparison studies, I will currently terminate based on
     // the unpreconditioned residual.  That may be the wrong thing to do down the road.
     fWatches["BiCGSTAB (using T = AS; evaluating norms)"].Start(false);
-    double WorstNorm = 0;
+    bool CanTerminate = true;
     std::vector<double> R_unprec = DoLPrecon(event.fR, event);
     for(size_t col = 0; col <= event.fWireModel.size(); col++) {
       size_t ColIndex = col*event.fColumnLength;
       size_t NextCol = ColIndex + event.fColumnLength;
       double Norm = 0;
-      for(size_t i = 0; i < event.fColumnLength; i++) {
-        if(i < fNoiseColumnLength) Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i]*fNoiseDiag[i];
-        else Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i];
+      for(size_t i = 0; i < fNoiseColumnLength; i++) {
+        Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i]*fNoiseDiag[i];
       }
-      if(Norm > WorstNorm) WorstNorm = Norm;
+      for(size_t i = fNoiseColumnLength; i < event.fColumnLength; i++) {
+        Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i];
+      }
+      if(Norm > fRThreshold*fRThreshold) {
+        CanTerminate = false;
+        break;
+      }
     }
     fWatches["BiCGSTAB (using T = AS; evaluating norms)"].Stop();
-    if(WorstNorm < fRThreshold*fRThreshold) {
+    if(CanTerminate) {
       fWatches["BiCGSTAB (using T = AS)"].Stop();
       fWatches["All of BiCGSTAB"].Stop();
       return true;
