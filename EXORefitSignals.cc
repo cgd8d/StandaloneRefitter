@@ -125,50 +125,65 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     std::vector<double>& block = fNoiseCorrelations[f-fMinF];
     block.assign(fChannels.size()*fChannels.size() * (IsFullBlock ? 4 : 1), 0);
 
-    // Iterate through column pairs.
+    // Iterate through columns (real).
     for(size_t index1 = 0; index1 < fChannels.size(); index1++) {
       unsigned char noiseIndex1 = NoiseCorr->GetIndexOfChannel(fChannels[index1]);
-      size_t ColPos = index1*fChannels.size()*(IsFullBlock ? 4 : 1);
+      size_t ColPos = index1*fChannels.size()*(IsFullBlock ? 2 : 1);
 
-      // Start with the real column.
+      // Start with the real rows.
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
              EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
         }
         unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
-        size_t RowPos = ColPos + index2*(IsFullBlock ? 2 : 1);
-
-        // real row.
+        size_t RowPos = ColPos + index2;
         block[RowPos] = NoiseCorr->GetRR(f)[noiseIndex2][noiseIndex1];
-        if(index1 == index2) {
-          fNoiseDiag[(f-fMinF)*2*fChannels.size() + index1*(IsFullBlock ? 2 : 1)] = block[RowPos];
+        if(index1 == index2) fNoiseDiag[(f-fMinF)*2*fChannels.size() + index1] = block[RowPos];
+      } // Done with real rows of real column.
+
+      // Now imaginary rows.
+      if(not IsFullBlock) continue;
+      for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
+        if(not fUseWireAPDCorrelations) {
+          if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
+             EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
         }
+        unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
+        size_t RowPos = ColPos + fChannels.size() + index2;
+        block[RowPos] = NoiseCorr->GetRI(f)[noiseIndex1][noiseIndex2];
+      } // Done with imaginary rows of real column.
+    } // Done with real columns.
 
-        // imag row.
-        if(IsFullBlock) block[RowPos+1] = NoiseCorr->GetRI(f)[noiseIndex1][noiseIndex2];
-      }
+    // Now the imaginary columns.
+    if(not IsFullBlock) continue;
+    for(size_t index1 = 0; index1 < fChannels.size(); index1++) {
+      unsigned char noiseIndex1 = NoiseCorr->GetIndexOfChannel(fChannels[index1]);
+      size_t ColPos = 2*fChannels.size()*fChannels.size() + index1*fChannels.size()*(IsFullBlock ? 2 : 1);
 
-      // Now the imag column.
-      if(IsFullBlock) {
-        ColPos += fChannels.size()*(IsFullBlock ? 2 : 1);
-        for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
-          unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
-          size_t RowPos = ColPos + index2*(IsFullBlock ? 2 : 1);
-
-          // real row.
-          block[RowPos] = NoiseCorr->GetRI(f)[noiseIndex2][noiseIndex1];
-
-          // imag row.
-          if(IsFullBlock) {
-            block[RowPos+1] = NoiseCorr->GetII(f)[noiseIndex2][noiseIndex1];
-            if(index1 == index2) {
-              fNoiseDiag[(f-fMinF)*2*fChannels.size() + index1*(IsFullBlock ? 2 : 1) + 1] = block[RowPos+1];
-            }
-          }
+      // Start with the real rows.
+      for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
+        if(not fUseWireAPDCorrelations) {
+          if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
+             EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
         }
-      }
-    } // End loop over column pairs (index1).
+        unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
+        size_t RowPos = ColPos + index2;
+        block[RowPos] = NoiseCorr->GetRI(f)[noiseIndex2][noiseIndex1];
+      } // Done with real rows of imag column.
+
+      // Now imaginary rows.
+      for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
+        if(not fUseWireAPDCorrelations) {
+          if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
+             EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
+        }
+        unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
+        size_t RowPos = ColPos + fChannels.size() + index2;
+        block[RowPos] = NoiseCorr->GetII(f)[noiseIndex1][noiseIndex2];
+        if(index1 == index2) fNoiseDiag[(f-fMinF)*2*fChannels.size() + fChannels.size() + index1] = block[RowPos];
+      } // Done with imaginary rows of imag column.
+    } // End loop over imag columns (index1).
   } // End loop over frequencies.  fNoiseCorrelations is initialized.
 
   // Cleanup -- this should do it.
@@ -806,9 +821,13 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     for(size_t i = 0; i < Results.size(); i++) {
       for(size_t f = 0; f <= fMaxF-fMinF; f++) {
         for(size_t chan_index = 0; chan_index < fChannels.size(); chan_index++) {
-          size_t XIndex = event->fColumnLength*i + 2*fChannels.size()*f + chan_index*(f < fMaxF-fMinF ? 2 : 1);
+          size_t XIndex = event->fColumnLength*i + 2*fChannels.size()*f + chan_index;
           Results[i] += event->fX[XIndex]*WF_real[chan_index][f+fMinF];
-          if(f < fMaxF-fMinF) Results[i] += event->fX[XIndex+1]*WF_imag[chan_index][f+fMinF];
+        }
+        if(f == fMaxF-fMinF) continue;
+        for(size_t chan_index = 0; chan_index < fChannels.size(); chan_index++) {
+          size_t XIndex = event->fColumnLength*i + 2*fChannels.size()*f + fChannels.size() + chan_index;
+          Results[i] += event->fX[XIndex]*WF_imag[chan_index][f+fMinF];
         }
       }
     }
@@ -1029,23 +1048,23 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
       // Compute the factors common to all frequencies.
       double CommonFactor = 0;
       for(size_t g = 0; g <= fMaxF - fMinF; g++) {
-        size_t DiagIndex = 2*fChannels.size()*g + k*(g < fMaxF-fMinF ? 2 : 1);
+        size_t DiagIndex = 2*fChannels.size()*g + k;
         size_t InIndex = n*event.fColumnLength + DiagIndex;
         CommonFactor += event.fmodel_realimag[2*g] * in[InIndex] *
                         fInvSqrtNoiseDiag[DiagIndex];
-        if(g < fMaxF-fMinF) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+1] *
-                                            fInvSqrtNoiseDiag[DiagIndex+1];
+        if(g < fMaxF-fMinF) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+fChannels.size()] *
+                                            fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
       }
       CommonFactor *= ChannelFactors;
 
       // Now actually transfer the changes to the out vector.
       for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-        size_t DiagIndex = 2*fChannels.size()*f + k*(f < fMaxF-fMinF ? 2 : 1);
+        size_t DiagIndex = 2*fChannels.size()*f + k;
         size_t OutIndex = n*event.fColumnLength + DiagIndex;
         out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] *
                          fInvSqrtNoiseDiag[DiagIndex];
-        if(f < fMaxF-fMinF) out[OutIndex+1] += CommonFactor * event.fmodel_realimag[2*f+1] *
-                                               fInvSqrtNoiseDiag[DiagIndex+1];
+        if(f < fMaxF-fMinF) out[OutIndex+fChannels.size()] += CommonFactor * event.fmodel_realimag[2*f+1] *
+                                               fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
       }
     }
   } // End Poisson terms.
