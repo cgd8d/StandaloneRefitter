@@ -115,6 +115,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     }
   }
   fNoiseColumnLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
+  size_t FileNumChannels = NUMBER_READOUT_CHANNELS - 2*NCHANNEL_PER_WIREPLANE;
 
   // Then fill fNoiseCorrelations.
   // Note that we store the same-frequency blocks in column-major order,
@@ -126,13 +127,17 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   fNoiseDiag.clear();
   fNoiseDiag.reserve(fNoiseColumnLength);
   assert(NoiseFile.open(fNoiseFilename.c_str(), std::ios_base::in | std::ios_base::binary) != NULL);
+  assert(outfile.pubseekoff(0, std::ios_base::beg, std::ios_base::in) == 0);
+  assert(outfile.pubseekoff(0, std::ios_base::end, std::ios_base::in) ==
+         FileNumChannels*FileNumChannels*(4*1023+1)*sizeof(double));
+  assert(sizeof(double) == 8);
   assert(fMinF == 1); // Else I'll need to generalize the code that produces these files.
   for(size_t f = fMinF; f <= fMaxF; f++) {
     bool IsFullBlock = (f != fMaxF);
     std::vector<double>& block = fNoiseCorrelations[f-fMinF];
     block.clear();
     block.reserve(fChannels.size()*fChannels.size()*(IsFullBlock ? 4 : 1));
-    size_t FileNumChannels = NUMBER_READOUT_CHANNELS - 2*NCHANNEL_PER_WIREPLANE;
+
     size_t FreqFilePos = (f-fMinF)*4*sizeof(double)*FileNumChannels*FileNumChannels;
 
     // Go ahead and fetch the entire block from the file.
@@ -140,8 +145,11 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     // but this prevents individual small queries which don't scale well.
     std::vector<double> FileBlock(FileNumChannels*FileNumChannels*(IsFullBlock ? 4 : 1)*sizeof(double), 0);
     assert(NoiseFile.pubseekpos(FreqFilePos, std::ios_base::in) == FreqFilePos);
-    assert(NoiseFile.sgetn((char*)&FileBlock[0], FileBlock.size()*sizeof(double)) ==
-           FileBlock.size()*sizeof(double));
+    if(NoiseFile.sgetn((char*)&FileBlock[0], FileBlock.size()*sizeof(double)) !=
+       FileBlock.size()*sizeof(double)) {
+      std::cout<<"Failed to read out block corresponding to f = "<<f<<std::endl;
+      LogEXOMsg("sgetn failed", EEAlert);
+    }
 
     // Iterate through columns (real).
     for(size_t index1 = 0; index1 < fChannels.size(); index1++) {

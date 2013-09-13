@@ -14,17 +14,20 @@ int main()
   std::vector<unsigned char> ChannelsToUse;
   for(unsigned char i = 0; i < NUMBER_READOUT_CHANNELS; i++) {
     if(EXOMiscUtil::TypeOfChannel(i) == EXOMiscUtil::kVWire) continue; // No v wires for now.
+    assert(noise->HasChannel(i));
     ChannelsToUse.push_back(i);
   }
+  assert(ChannelsToUse.size() == NUMBER_READOUT_CHANNELS - 2*NCHANNEL_PER_WIREPLANE);
 
   std::filebuf outfile;
   outfile.open("/global/u1/c/claytond/TestEXOAnalysisBuild/noise_manyruns_withuwires_100000.dat",
                std::ios_base::out | std::ios_base::binary);
+  assert(outfile.pubseekoff(0, std::ios_base::cur, std::ios_base::out) == 0);
 
   std::vector<Double_t> Buffer; // Collect batches of noise information.
 
   for(size_t f = 1; f <= 1024; f++) {
-    Buffer.resize(0);
+    Buffer.clear();
 
     // First do real columns.
     for(size_t index1 = 0; index1 < ChannelsToUse.size(); index1++) {
@@ -70,6 +73,8 @@ int main()
     assert(outfile.sputn((char*)&Buffer[0], numChars) == numChars);
   }
   assert(outfile.pubseekoff(0, std::ios_base::cur, std::ios_base::out) ==
+         8*ChannelsToUse.size()*ChannelsToUse.size()*(4*1023 + 1));
+  assert(outfile.pubseekoff(0, std::ios_base::end, std::ios_base::out) ==
          8*ChannelsToUse.size()*ChannelsToUse.size()*(4*1023 + 1));
   assert(outfile.close() != NULL);
 }
