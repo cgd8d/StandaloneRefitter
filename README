@@ -9,10 +9,26 @@ Note that the whole matrix A is not identical event-by-event -- just the noise p
 Basic plan:  the class should have two matrices (column-major), one of which is designated the queue for vectors needing to be multiplied.  Each event needs to track where it put its own vectors in the matrix.  When it's time, matrix multiplication gets called, and results are put into a result matrix.  The queue matrix is cleared, ready to accept new requests.
 
 
+Memory usage, for 40 simultaneous signals (fColumnLength ~ 3e5, max number of signals per event = 5):
+fNoiseMulQueue:	3e5*40*8B = 			96 MB
+fNoiseResultQueue:				96 MB
+fWireDeposit: 512*10*8B =			negligible
+fWireInduction:					negligible
+fLightMaps: 80*40^3*8B =			41 MB
+fGainMaps:
+fNoiseDiag: 3e5*8B =				2.4 MB
+fInvSqrtNoiseDiag:				2.4 MB
+fNoiseCorrelations: 3e5*300*8B=			720 MB
+EventHandler signal solvers: 6*40*3e5*8B =	576 MB
+fWireModel: 40*2000*8B =			negligible
+Workspace: 3e5*5*8B =				12 MB
+fWFEvent: 226*2000*4B =				2 MB
+
+So, I can only account for 1.6 GB; there's a mysterious 900 MB I can't locate...
+Could it be libraries I'm linking with?  (Ie do they get loaded into memory?)
 
 ToDO:
 
-- Make setup of noise correlation matrix smoother by reading in blocks in one batch, to reduce the number of separate calls being made.
 - Track down memory hogs -- where is all of the memory usage coming from exactly?
 - Make it easy to select just refitting APDs, to reproduce what the old module did.
 - Write up code (EXOAnalysis, EXOFitting, script) for getting a rotated resolution from a denoised file.
@@ -21,6 +37,7 @@ ToDO:
 - Improve noise matrix by exploiting symmetries.  (Are there any in DFT domain?)
 - SLAC vs NERSC (it's looking like NERSC is necessary -- but it would be nice to give Tony a firm answer on this before asking he get xrootd working again).
 - Make it possible to set a threshold on the command-line.
+- Write up note in latex, explaining algorithm and implementation.
 
 With the important goals of:
 - Compare speeds at SLAC vs NERSC (various flavors at SLAC; don't bother with multithreaded NERSC MKL).
