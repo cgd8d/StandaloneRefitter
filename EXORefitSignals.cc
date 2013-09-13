@@ -1159,6 +1159,7 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
 {
   // Multiply by K2_inv.
   fWatches["DoInvRPrecon"].Start(false);
+  fWatches["DoInvRPrecon (part 1)"].Start(false);
   std::vector<double> out(in.size(), 0);
   mkl_domatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
                 1, &in[fNoiseColumnLength], event.fColumnLength,
@@ -1167,12 +1168,14 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
               event.fWireModel.size()+1, event.fWireModel.size()+1,
               1, &event.fPreconX[0], event.fWireModel.size()+1,
               &out[fNoiseColumnLength], event.fColumnLength); // out = {{0} {X^(-1)v2}}
+  fWatches["DoInvRPrecon (part 1)"].Stop();
   fWatches["DoInvRPrecon"].Stop();
   DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{LX^(-1)v2} {X^(-1)v2}}
   fWatches["DoInvRPrecon"].Start(false);
 
   // Using MKL, diamm and omatadd are both out-of-place.
   // Use the static global workspace.
+  fWatches["DoInvRPrecon (part 2)"].Start(false);
   Workspace.resize(fNoiseColumnLength*(event.fWireModel.size()+1));
 
   ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
@@ -1182,6 +1185,7 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
                -1, &Workspace[0], fNoiseColumnLength,
                1, &in[0], event.fColumnLength,
                &out[0], event.fColumnLength); // out = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
+  fWatches["DoInvRPrecon (part 2)"].Stop();
   fWatches["DoInvRPrecon"].Stop();
   return out;
 }
