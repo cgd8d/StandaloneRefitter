@@ -135,11 +135,18 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     size_t FileNumChannels = NUMBER_READOUT_CHANNELS - 2*NCHANNEL_PER_WIREPLANE;
     size_t FreqFilePos = (f-fMinF)*4*sizeof(double)*FileNumChannels*FileNumChannels;
 
+    // Go ahead and fetch the entire block from the file.
+    // A few rows/columns aren't needed (suppressed or bad channels),
+    // but this prevents individual small queries which don't scale well.
+    std::vector<double> FileBlock(FileNumChannels*FileNumChannels*(IsFullBlock ? 4 : 1)*sizeof(double), 0);
+    assert(NoiseFile.pubseekpos(FreqFilePos, std::ios_base::in) == FreqFilePos);
+    assert(NoiseFile.sgetn((char*)&FileBlock[0], FileBlock.size()*sizeof(double)) ==
+           FileBlock.size()*sizeof(double));
+
     // Iterate through columns (real).
     for(size_t index1 = 0; index1 < fChannels.size(); index1++) {
       size_t NoiseFileIndex1 = ChannelIndexMap[index1];
-      size_t ColumnPos = FreqFilePos +
-                         (IsFullBlock ? 2 : 1) * FileNumChannels * NoiseFileIndex1 * sizeof(double);
+      size_t ColumnPos = (IsFullBlock ? 2 : 1) * FileNumChannels * NoiseFileIndex1;
 
       // Start with the real rows.
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
@@ -151,17 +158,14 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
           }
         }
         size_t NoiseFileIndex2 = ChannelIndexMap[index2];
-        size_t RowPos = ColumnPos + NoiseFileIndex2*sizeof(double);
-        double buffer;
-        assert(NoiseFile.pubseekpos(RowPos, std::ios_base::in) == RowPos);
-        assert(NoiseFile.sgetn((char*)&buffer, sizeof(double)) == sizeof(double));
-        block.push_back(buffer);
-        if(index1 == index2) fNoiseDiag.push_back(buffer);
+        size_t RowPos = ColumnPos + NoiseFileIndex2;
+        block.push_back(FileBlock[RowPos]);
+        if(index1 == index2) fNoiseDiag.push_back(FileBlock[RowPos]);
       } // Done with real rows of real column.
 
       // Now imaginary rows.
       if(not IsFullBlock) continue;
-      ColumnPos += FileNumChannels*sizeof(double);
+      ColumnPos += FileNumChannels;
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
@@ -171,21 +175,16 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
           }
         }
         size_t NoiseFileIndex2 = ChannelIndexMap[index2];
-        size_t RowPos = ColumnPos + NoiseFileIndex2*sizeof(double);
-        double buffer;
-        assert(NoiseFile.pubseekpos(RowPos, std::ios_base::in) == RowPos);
-        assert(NoiseFile.sgetn((char*)&buffer, sizeof(double)) == sizeof(double));
-        block.push_back(buffer);
+        size_t RowPos = ColumnPos + NoiseFileIndex2;
+        block.push_back(FileBlock[RowPos]);
       } // Done with imaginary rows of real column.
     } // Done with real columns.
 
     // Now the imaginary columns.
     if(not IsFullBlock) continue;
-    FreqFilePos += 2*FileNumChannels*FileNumChannels*sizeof(double);
     for(size_t index1 = 0; index1 < fChannels.size(); index1++) {
       size_t NoiseFileIndex1 = ChannelIndexMap[index1];
-      size_t ColumnPos = FreqFilePos +
-                         2 * FileNumChannels * NoiseFileIndex1 * sizeof(double);
+      size_t ColumnPos = 2*FileNumChannels*(FileNumChannels+NoiseFileIndex1);
 
       // Start with the real rows.
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
@@ -197,16 +196,13 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
           }
         }
         size_t NoiseFileIndex2 = ChannelIndexMap[index2];
-        size_t RowPos = ColumnPos + NoiseFileIndex2*sizeof(double);
-        double buffer;
-        assert(NoiseFile.pubseekpos(RowPos, std::ios_base::in) == RowPos);
-        assert(NoiseFile.sgetn((char*)&buffer, sizeof(double)) == sizeof(double));
-        block.push_back(buffer);
+        size_t RowPos = ColumnPos + NoiseFileIndex2;
+        block.push_back(FileBlock[RowPos]);
       } // Done with real rows of imag column.
 
       // Now imaginary rows.
       if(not IsFullBlock) continue;
-      ColumnPos += FileNumChannels*sizeof(double);
+      ColumnPos += FileNumChannels;
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
@@ -216,12 +212,9 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
           }
         }
         size_t NoiseFileIndex2 = ChannelIndexMap[index2];
-        size_t RowPos = ColumnPos + NoiseFileIndex2*sizeof(double);
-        double buffer;
-        assert(NoiseFile.pubseekpos(RowPos, std::ios_base::in) == RowPos);
-        assert(NoiseFile.sgetn((char*)&buffer, sizeof(double)) == sizeof(double));
-        block.push_back(buffer);
-        if(index1 == index2) fNoiseDiag.push_back(buffer);
+        size_t RowPos = ColumnPos + NoiseFileIndex2;
+        block.push_back(FileBlock[RowPos]);
+        if(index1 == index2) fNoiseDiag.push_back(FileBlock[RowPos]);
       } // Done with imaginary rows of imag column.
     } // End loop over imag columns (index1).
   } // End loop over frequencies.
