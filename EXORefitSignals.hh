@@ -37,6 +37,7 @@ class EXORefitSignals
   void SetNoiseFilename(std::string name) { fNoiseFilename = name; }
   void SetLightmapFilename(std::string name) { fLightmapFilename = name; }
   void SetRThreshold(double threshold) { fRThreshold = threshold; }
+  bool fAPDsOnly; // Do not denoise wire signals; and do not use u-wires to denoise APDs.
   bool fUseWireAPDCorrelations; // For now, this isn't higher performance -- just for testing.
   bool fOnlyEstimateConditionNumbers; // Use for studying the quality of preconditioners.
 

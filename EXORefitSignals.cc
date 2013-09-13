@@ -48,7 +48,8 @@
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
                                  EXOTreeOutputModule& outputModule)
-: fUseWireAPDCorrelations(true),
+: fAPDsOnly(false),
+  fUseWireAPDCorrelations(true),
   fOnlyEstimateConditionNumbers(false),
   fInputModule(inputModule),
   fWFTree(wfTree),
@@ -83,6 +84,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   std::vector<unsigned char> ChannelsToUse;
   for(unsigned char i = 0; i < NUMBER_READOUT_CHANNELS; i++) {
     if(EXOMiscUtil::TypeOfChannel(i) == EXOMiscUtil::kVWire) continue; // No v wires for now.
+    if(fAPDsOnly and EXOMiscUtil::TypeOfChannel(i) != EXOMiscUtil::kAPDGang) continue;
     if(ChannelMap.channel_suppressed_by_daq(i) or not ChannelMap.good_channel(i)) continue;
     ChannelsToUse.push_back(i);
   }
@@ -255,6 +257,11 @@ int EXORefitSignals::Initialize()
   // Create unshaped wire drift waveforms.
   // Also initialize our various timers.
 
+  // Initialize counters.
+  fNumEventsHandled = 0;
+  fNumSignalsHandled = 0;
+  fTotalIterationsDone = 0;
+
   std::string FullLightmapFilename = EXOMiscUtil::SearchForFile(fLightmapFilename);
   if(FullLightmapFilename == "") LogEXOMsg("Failed to find lightmap file.", EEAlert);
   TFile* LightmapFile = TFile::Open(FullLightmapFilename.c_str());
@@ -278,6 +285,9 @@ int EXORefitSignals::Initialize()
     fGainMaps[gang] = (TGraph*)LightmapFile->Get(old_gainmap.c_str())->Clone(new_gainmap.c_str());
   }
   delete LightmapFile;
+
+  // If we're doing APDs only, we don't need to generate wire models.
+  if(fAPDsOnly) return 0;
 
   // Create wire drift waveforms.
   // The results will be high-bandpass waveforms, with the deposit occurring at 256us.
@@ -310,10 +320,6 @@ int EXORefitSignals::Initialize()
   fWireDeposit /= MaxVal;
   fWireInduction /= MaxVal;
 
-  // Initialize counters too.
-  fNumEventsHandled = 0;
-  fNumSignalsHandled = 0;
-  fTotalIterationsDone = 0;
   return 0;
 }
 
@@ -630,62 +636,64 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
   // Now produce the expected wire signals.
   event->fWireModel.clear();
-  std::set<size_t> UWireSignals;
-  EXOElectronicsShapers* electronicsShapers = GetCalibrationFor(EXOElectronicsShapers, 
-                                                                EXOElectronicsShapersHandler, 
-                                                                "timevartau", 
-                                                                ED->fEventHeader);
-  const EXOUWireGains* GainsFromDatabase = GetCalibrationFor(EXOUWireGains,
-                                                             EXOUWireGainsHandler,
-                                                             "source_calibration",
-                                                             ED->fEventHeader);
-  if(not electronicsShapers or not GainsFromDatabase) {
-    LogEXOMsg("Unable to get necessary information from DB", EEAlert);
-  }
-  for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
-    EXOUWireSignal* sig = ED->GetUWireSignal(i);
-    if(sig->fIsInduction) continue;
-    UWireSignals.insert(i);
-  }
-  for(std::set<size_t>::iterator sigIt = UWireSignals.begin();
-      sigIt != UWireSignals.end();
-      sigIt++) {
-    EXOUWireSignal* sig = ED->GetUWireSignal(*sigIt);
-
-    std::map<unsigned char, std::vector<double> > ModelForThisSignal;
-
-    // Deposit channel.
-    const EXOTransferFunction& transferDep =
-      electronicsShapers->GetTransferFunctionForChannel(sig->fChannel);
-    double Gain = transferDep.GetGain();
-    double DepChanGain = GainsFromDatabase->GetGainOnChannel(sig->fChannel);
-    ModelForThisSignal[sig->fChannel] = MakeWireModel(fWireDeposit,
-                                                      transferDep,
-                                                      Gain,
-                                                      sig->fTime);
-
-    if(EXOMiscUtil::TypeOfChannel(sig->fChannel-1) == EXOMiscUtil::kUWire) {
-      const EXOTransferFunction& transferInd =
-        electronicsShapers->GetTransferFunctionForChannel(sig->fChannel-1);
-      double ThisChanGain = Gain * GainsFromDatabase->GetGainOnChannel(sig->fChannel-1)/DepChanGain;
-      ModelForThisSignal[sig->fChannel-1] = MakeWireModel(fWireInduction,
-                                                          transferInd,
-                                                          ThisChanGain,
-                                                          sig->fTime);
+  if(not fAPDsOnly) {
+    std::set<size_t> UWireSignals;
+    EXOElectronicsShapers* electronicsShapers = GetCalibrationFor(EXOElectronicsShapers,
+                                                                  EXOElectronicsShapersHandler,
+                                                                  "timevartau",
+                                                                  ED->fEventHeader);
+    const EXOUWireGains* GainsFromDatabase = GetCalibrationFor(EXOUWireGains,
+                                                               EXOUWireGainsHandler,
+                                                               "source_calibration",
+                                                               ED->fEventHeader);
+    if(not electronicsShapers or not GainsFromDatabase) {
+      LogEXOMsg("Unable to get necessary information from DB", EEAlert);
     }
-
-    if(EXOMiscUtil::TypeOfChannel(sig->fChannel+1) == EXOMiscUtil::kUWire) {
-      const EXOTransferFunction& transferInd =
-        electronicsShapers->GetTransferFunctionForChannel(sig->fChannel+1);
-      double ThisChanGain = Gain * GainsFromDatabase->GetGainOnChannel(sig->fChannel+1)/DepChanGain;
-      ModelForThisSignal[sig->fChannel+1] = MakeWireModel(fWireInduction,
-                                                          transferInd,
-                                                          ThisChanGain,
-                                                          sig->fTime);
+    for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
+      EXOUWireSignal* sig = ED->GetUWireSignal(i);
+      if(sig->fIsInduction) continue;
+      UWireSignals.insert(i);
     }
+    for(std::set<size_t>::iterator sigIt = UWireSignals.begin();
+        sigIt != UWireSignals.end();
+        sigIt++) {
+      EXOUWireSignal* sig = ED->GetUWireSignal(*sigIt);
 
-    event->fWireModel.push_back(std::make_pair(*sigIt, ModelForThisSignal));
-  } // End loop over u-wire signals.
+      std::map<unsigned char, std::vector<double> > ModelForThisSignal;
+
+      // Deposit channel.
+      const EXOTransferFunction& transferDep =
+        electronicsShapers->GetTransferFunctionForChannel(sig->fChannel);
+      double Gain = transferDep.GetGain();
+      double DepChanGain = GainsFromDatabase->GetGainOnChannel(sig->fChannel);
+      ModelForThisSignal[sig->fChannel] = MakeWireModel(fWireDeposit,
+                                                        transferDep,
+                                                        Gain,
+                                                        sig->fTime);
+
+      if(EXOMiscUtil::TypeOfChannel(sig->fChannel-1) == EXOMiscUtil::kUWire) {
+        const EXOTransferFunction& transferInd =
+          electronicsShapers->GetTransferFunctionForChannel(sig->fChannel-1);
+        double ThisChanGain = Gain * GainsFromDatabase->GetGainOnChannel(sig->fChannel-1)/DepChanGain;
+        ModelForThisSignal[sig->fChannel-1] = MakeWireModel(fWireInduction,
+                                                            transferInd,
+                                                            ThisChanGain,
+                                                            sig->fTime);
+      }
+
+      if(EXOMiscUtil::TypeOfChannel(sig->fChannel+1) == EXOMiscUtil::kUWire) {
+        const EXOTransferFunction& transferInd =
+          electronicsShapers->GetTransferFunctionForChannel(sig->fChannel+1);
+        double ThisChanGain = Gain * GainsFromDatabase->GetGainOnChannel(sig->fChannel+1)/DepChanGain;
+        ModelForThisSignal[sig->fChannel+1] = MakeWireModel(fWireInduction,
+                                                            transferInd,
+                                                            ThisChanGain,
+                                                            sig->fTime);
+      }
+
+      event->fWireModel.push_back(std::make_pair(*sigIt, ModelForThisSignal));
+    } // End loop over u-wire signals.
+  } // (which we only did if we're handling wire signals.
   fWatches["GenerateExpectedSignals"].Stop();
 
   // For convenience, store the column length we'll be dealing with.
@@ -873,17 +881,19 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     }
 
     // Translate signal magnitudes into corresponding objects.
-    const EXOUWireGains* GainsFromDatabase = GetCalibrationFor(EXOUWireGains,
-                                                               EXOUWireGainsHandler,
-                                                               "source_calibration",
-                                                               ED->fEventHeader);
-    for(size_t i = 0; i < event->fWireModel.size(); i++) {
-      size_t sigIndex = event->fWireModel[i].first;
-      EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
-      double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
-                                  (CLHEP::keV * ADC_BITS);
-      double GainCorrection = GainsFromDatabase->GetGainOnChannel(sig->fChannel)/300.0;
-      sig->fDenoisedEnergy = Results[i]*GainCorrection*UWireScalingFactor;
+    if(not fAPDsOnly) {
+      const EXOUWireGains* GainsFromDatabase = GetCalibrationFor(EXOUWireGains,
+                                                                 EXOUWireGainsHandler,
+                                                                 "source_calibration",
+                                                                 ED->fEventHeader);
+      for(size_t i = 0; i < event->fWireModel.size(); i++) {
+        size_t sigIndex = event->fWireModel[i].first;
+        EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
+        double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
+                                    (CLHEP::keV * ADC_BITS);
+        double GainCorrection = GainsFromDatabase->GetGainOnChannel(sig->fChannel)/300.0;
+        sig->fDenoisedEnergy = Results[i]*GainCorrection*UWireScalingFactor;
+      }
     }
     ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
     fWatches["Finish computing denoised parameters"].Stop();
