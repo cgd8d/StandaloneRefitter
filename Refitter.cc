@@ -46,7 +46,7 @@ int main(int argc, char** argv)
   OutputModule.BeginOfRun(NULL); // OK, fine -- shortcut here, I assume input has only one run.
 
   EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
-  RefitSig.SetNoiseFilename("/global/u1/c/claytond/TestEXOAnalysisBuild/noise_manyruns_withuwires_100000.root");
+  RefitSig.SetNoiseFilename("/global/u1/c/claytond/TestEXOAnalysisBuild/noise_manyruns_withuwires_100000.dat");
   RefitSig.SetRThreshold(0.1);
   RefitSig.Initialize();
 

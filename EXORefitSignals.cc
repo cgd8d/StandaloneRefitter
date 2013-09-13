@@ -23,7 +23,6 @@
 #include "EXOCalibUtilities/EXOUWireGains.hh"
 #include "EXOCalibUtilities/EXOLifetimeCalib.hh"
 #include "EXOCalibUtilities/EXOGridCorrectionCalib.hh"
-#include "EXOUtilities/EXONoiseCorrelations.hh"
 #include "EXOUtilities/EXOEventData.hh"
 #include "EXOUtilities/EXODigitizeWires.hh"
 #include "EXOUtilities/EXOWaveform.hh"
@@ -44,6 +43,7 @@
 #include <sstream>
 #include <cstdlib>
 #include <algorithm>
+#include <fstream>
 
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
@@ -97,6 +97,15 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // Start by flushing all currently-held events, since the noise information will change.
   FlushEvents();
 
+  // Build a map from channel index to where it can be found in the noise file.
+  std::map<size_t, size_t> ChannelIndexMap;
+  for(size_t i = 0; i < ChannelsToUse.size(); i++) {
+    unsigned char software_channel = ChannelsToUse[i];
+    if(software_channel < NCHANNEL_PER_WIREPLANE) ChannelIndexMap[i] = software_channel;
+    else if(software_channel < 3*NCHANNEL_PER_WIREPLANE) ChannelIndexMap[i] = software_channel - NCHANNEL_PER_WIREPLANE;
+    else ChannelIndexMap[i] = software_channel - 2*NCHANNEL_PER_WIREPLANE;
+  }
+
   // For convenience, pre-store useful parameters.
   fChannels = ChannelsToUse;
   for(size_t i = 0; i < fChannels.size(); i++) {
@@ -112,78 +121,112 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // to simplify GEMM calls (if BLAS is provided).
   // We also extract the diagonal entries, for the purpose of preconditioning.
   fNoiseCorrelations.resize(fMaxF - fMinF + 1);
-  TFile* NoiseFile = TFile::Open(fNoiseFilename.c_str());
-  EXONoiseCorrelations* NoiseCorr =
-    dynamic_cast<EXONoiseCorrelations*>(NoiseFile->Get("EXONoiseCorrelations"));
-  fNoiseDiag.resize(fNoiseColumnLength);
+
+  std::filebuf NoiseFile;
+  fNoiseDiag.clear();
+  fNoiseDiag.reserve(fNoiseColumnLength);
+  assert(NoiseFile.open(fNoiseFilename.c_str(), std::ios_base::in | std::ios_base::binary) != NULL);
+  assert(fMinF == 1); // Else I'll need to generalize the code that produces these files.
   for(size_t f = fMinF; f <= fMaxF; f++) {
     bool IsFullBlock = (f != fMaxF);
     std::vector<double>& block = fNoiseCorrelations[f-fMinF];
-    block.assign(fChannels.size()*fChannels.size() * (IsFullBlock ? 4 : 1), 0);
+    block.clear();
+    block.reserve(fChannels.size()*fChannels.size()*(IsFullBlock ? 4 : 1));
+    size_t FileNumChannels = NUMBER_READOUT_CHANNELS - 2*NCHANNEL_PER_WIREPLANE;
+    size_t FreqFilePos = (f-fMinF)*4*sizeof(double)*FileNumChannels*FileNumChannels;
 
     // Iterate through columns (real).
     for(size_t index1 = 0; index1 < fChannels.size(); index1++) {
-      unsigned char noiseIndex1 = NoiseCorr->GetIndexOfChannel(fChannels[index1]);
-      size_t ColPos = index1*fChannels.size()*(IsFullBlock ? 2 : 1);
+      size_t NoiseFileIndex1 = ChannelIndexMap[index1];
+      size_t ColumnPos = FreqFilePos +
+                         (IsFullBlock ? 2 : 1) * FileNumChannels * NoiseFileIndex1 * sizeof(double);
 
       // Start with the real rows.
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
-             EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
+             EXOMiscUtil::TypeOfChannel(fChannels[index2])) {
+            block.push_back(0);
+            continue;
+          }
         }
-        unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
-        size_t RowPos = ColPos + index2;
-        block[RowPos] = NoiseCorr->GetRR(f)[noiseIndex2][noiseIndex1];
-        if(index1 == index2) fNoiseDiag[(f-fMinF)*2*fChannels.size() + index1] = block[RowPos];
+        size_t NoiseFileIndex2 = ChannelIndexMap[index2];
+        size_t RowPos = ColumnPos + NoiseFileIndex2*sizeof(double);
+        double buffer;
+        assert(NoiseFile.pubseekpos(RowPos, std::ios_base::in) == RowPos);
+        assert(NoiseFile.sgetn((char*)&buffer, sizeof(double)) == sizeof(double));
+        block.push_back(buffer);
+        if(index1 == index2) fNoiseDiag.push_back(buffer);
       } // Done with real rows of real column.
 
       // Now imaginary rows.
       if(not IsFullBlock) continue;
+      ColumnPos += FileNumChannels*sizeof(double);
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
-             EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
+             EXOMiscUtil::TypeOfChannel(fChannels[index2])) {
+            block.push_back(0);
+            continue;
+          }
         }
-        unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
-        size_t RowPos = ColPos + fChannels.size() + index2;
-        block[RowPos] = NoiseCorr->GetRI(f)[noiseIndex1][noiseIndex2];
+        size_t NoiseFileIndex2 = ChannelIndexMap[index2];
+        size_t RowPos = ColumnPos + NoiseFileIndex2*sizeof(double);
+        double buffer;
+        assert(NoiseFile.pubseekpos(RowPos, std::ios_base::in) == RowPos);
+        assert(NoiseFile.sgetn((char*)&buffer, sizeof(double)) == sizeof(double));
+        block.push_back(buffer);
       } // Done with imaginary rows of real column.
     } // Done with real columns.
 
     // Now the imaginary columns.
     if(not IsFullBlock) continue;
+    FreqFilePos += 2*FileNumChannels*FileNumChannels*sizeof(double);
     for(size_t index1 = 0; index1 < fChannels.size(); index1++) {
-      unsigned char noiseIndex1 = NoiseCorr->GetIndexOfChannel(fChannels[index1]);
-      size_t ColPos = 2*fChannels.size()*fChannels.size() + index1*fChannels.size()*(IsFullBlock ? 2 : 1);
+      size_t NoiseFileIndex1 = ChannelIndexMap[index1];
+      size_t ColumnPos = FreqFilePos +
+                         2 * FileNumChannels * NoiseFileIndex1 * sizeof(double);
 
       // Start with the real rows.
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
-             EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
+             EXOMiscUtil::TypeOfChannel(fChannels[index2])) {
+            block.push_back(0);
+            continue;
+          }
         }
-        unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
-        size_t RowPos = ColPos + index2;
-        block[RowPos] = NoiseCorr->GetRI(f)[noiseIndex2][noiseIndex1];
+        size_t NoiseFileIndex2 = ChannelIndexMap[index2];
+        size_t RowPos = ColumnPos + NoiseFileIndex2*sizeof(double);
+        double buffer;
+        assert(NoiseFile.pubseekpos(RowPos, std::ios_base::in) == RowPos);
+        assert(NoiseFile.sgetn((char*)&buffer, sizeof(double)) == sizeof(double));
+        block.push_back(buffer);
       } // Done with real rows of imag column.
 
       // Now imaginary rows.
+      if(not IsFullBlock) continue;
+      ColumnPos += FileNumChannels*sizeof(double);
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
-             EXOMiscUtil::TypeOfChannel(fChannels[index2])) continue;
+             EXOMiscUtil::TypeOfChannel(fChannels[index2])) {
+            block.push_back(0);
+            continue;
+          }
         }
-        unsigned char noiseIndex2 = NoiseCorr->GetIndexOfChannel(fChannels[index2]);
-        size_t RowPos = ColPos + fChannels.size() + index2;
-        block[RowPos] = NoiseCorr->GetII(f)[noiseIndex1][noiseIndex2];
-        if(index1 == index2) fNoiseDiag[(f-fMinF)*2*fChannels.size() + fChannels.size() + index1] = block[RowPos];
+        size_t NoiseFileIndex2 = ChannelIndexMap[index2];
+        size_t RowPos = ColumnPos + NoiseFileIndex2*sizeof(double);
+        double buffer;
+        assert(NoiseFile.pubseekpos(RowPos, std::ios_base::in) == RowPos);
+        assert(NoiseFile.sgetn((char*)&buffer, sizeof(double)) == sizeof(double));
+        block.push_back(buffer);
+        if(index1 == index2) fNoiseDiag.push_back(buffer);
       } // Done with imaginary rows of imag column.
     } // End loop over imag columns (index1).
-  } // End loop over frequencies.  fNoiseCorrelations is initialized.
-
-  // Cleanup -- this should do it.
-  delete NoiseFile;
+  } // End loop over frequencies.
+  assert(fNoiseDiag.size() == fNoiseColumnLength);
+  NoiseFile.close();
 
   // Precompute useful transformations of the noise diagonal.
   fInvSqrtNoiseDiag.resize(fNoiseDiag.size());
