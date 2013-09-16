@@ -84,15 +84,15 @@ With the important goals of:
 
 
 
-For efficient running on NERSC (edison or hopper), I need to have some kind of multi-threading which lets me run 6-threaded processes efficiently.  This requires:
+For efficient running on NERSC (edison or hopper), I need to have some kind of multi-threading which lets me run multi-threaded processes efficiently.  In all cases, I can achieve this most efficiently by managing the thread pools myself -- for noise multiplication I can dispatch frequency blocks to independent threads, and for the rest of solving I can handle whole events in parallel. This requires:
 
-* Link to the multi-threaded version of MKL.
-	Use MKL functions to control the number of threads: 6 for noise solving, 1 for the rest of the code.
-* Looping through BiCGSTAB finish-up, manage a pool of six threads and finish events one at a time.
+* Keep linking to the sequential version of MKL.
+* Looping through BiCGSTAB finish-up, manage a pool of N threads and finish events one at a time.
 	Use a lock on writing events to output.
 	Use a lock on writing noise multiplication requests.
-* Keep event reading and initial estimation single-threaded.
-* Replace the static global workspace with something better.
+* Looping through frequency blocks of noise multiplication, manage a pool again.
+* Keep event reading and initial estimation single-threaded for now.
+* Replace the static global workspace with something thread-safe.
 
 
 
