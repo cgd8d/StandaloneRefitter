@@ -29,10 +29,19 @@ Could it be libraries I'm linking with?  (Ie do they get loaded into memory?)
 
 ToDO:
 
+New high-priority tasks:
+* Convert to use static linking.
+	I'm attempting to rebuild my ROOT installation statically.
+* Run from an executable on scratch, and with all files also on scratch.  (Use $GSCRATCH2)
+* Understand why reading chunks from file crashes; add lots of assert statements to make sure I'm creating and reading the noise file properly.
+O Test whether xrootd is currently working for raw root files at NERSC.
+- I should overwrite fRawEnergy, for now anyway.
+
+
 - Track down memory hogs -- where is all of the memory usage coming from exactly?
-- Make it easy to select just refitting APDs, to reproduce what the old module did.
 - Write up code (EXOAnalysis, EXOFitting, script) for getting a rotated resolution from a denoised file.
 - Investigate whether I can reorganize preconditioners to be faster, since they're the non-noise bottleneck.
+	I've added a watch to DoInvRPrecon, which should give valuable information.
 * Verify that reasonable results are being produced by current code!!
 - Improve noise matrix by exploiting symmetries.  (Are there any in DFT domain?)
 - SLAC vs NERSC (it's looking like NERSC is necessary -- but it would be nice to give Tony a firm answer on this before asking he get xrootd working again).
@@ -46,7 +55,8 @@ With the important goals of:
 * Verify whether I gain anything by including wires.
 	If so, pin down exactly what is providing the gain -- better APD denoising, or wire denoising.
 
-
+0 Mike is going to stress-test NERSC waveform access, to see what kind of combined waveform read speed is acheivable.
+0 Mike will ask Tony to get a pipeline task set up at SLAC.
 
 
 	The algorithms can be denoted by a box, where some plausible options are:
@@ -68,4 +78,24 @@ With the important goals of:
 	Denoise Wires
 
 	Each box filled in should give a strictly better result; the question is which boxes are negligible.
+
+
+
+
+
+
+For efficient running on NERSC (edison or hopper), I need to have some kind of multi-threading which lets me run 6-threaded processes efficiently.  This requires:
+
+* Link to the multi-threaded version of MKL.
+	Use MKL functions to control the number of threads: 6 for noise solving, 1 for the rest of the code.
+* Looping through BiCGSTAB finish-up, manage a pool of six threads and finish events one at a time.
+	Use a lock on writing events to output.
+	Use a lock on writing noise multiplication requests.
+* Keep event reading and initial estimation single-threaded.
+* Replace the static global workspace with something better.
+
+
+
+
+
 
