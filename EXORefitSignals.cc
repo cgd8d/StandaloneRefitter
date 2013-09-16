@@ -1132,7 +1132,50 @@ void EXORefitSignals::DoNoiseMultiplication()
 
   // Do the multiplication -- one call for every frequency.
   fWatches["DoNoiseMultiplication"].Start(false); // Don't count vector allocation.
-  for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+#ifdef USE_THREADS
+  boost::thread_group threads;
+
+  // frequencies_per_thread is the number of frequencies to distribute, rounding down.
+  // threads_with_extra is the number of threads we'll actually give one extra frequency to.
+  size_t frequencies_per_thread = (fMaxF-fMinF+1)/(NUM_THREADS); // round down
+  size_t threads_with_extra = (fMaxF-fMinF+1) - frequencies_per_thread*(NUM_THREADS);
+
+  for(size_t i = 0; i < threads_with_extra; i++) {
+    size_t flo = i*(frequencies_per_thread+1);
+    threads.add_thread(new boost::thread(EXORefitSignals::DoNoiseMultiplication_Range,
+                                         this,
+                                         flo,
+                                         flo + frequencies_per_thread + 1));
+  }
+  for(size_t i = threads_with_extra; i < (NUM_THREADS)-1; i++) {
+    size_t flo = threads_with_extra + i*frequencies_per_thread;
+    threads.add_thread(new boost::thread(EXORefitSignals::DoNoiseMultiplication_Range,
+                                         this,
+                                         flo,
+                                         flo + frequencies_per_thread));
+  }
+  // Don't create the last thread; *this* is the last thread.
+  size_t flo = threads_with_extra + ((NUM_THREADS)-1)*frequencies_per_thread;
+  DoNoiseMultiplication_Range(flo, (fMaxF-fMinF+2)); // to handle [0, fMaxF-fMinF+1], inclusive.
+  threads.join_all();
+#else
+  // The sequential version.
+  DoNoise_Multiplication_Range(0, (fMaxF-fMinF+2)); // to handle [0, fMaxF-fMinF+1], inclusive.
+#endif
+  fWatches["DoNoiseMultiplication"].Stop();
+
+  // Clean up, to be ready for the next call.
+  fNoiseMulQueue.clear(); // Hopefully doesn't free memory, since I'll need it again.
+  fNumVectorsInQueue = 0;
+}
+
+void EXORefitSignals::DoNoiseMultiplication_Range(size_t flo, size_t fhi)
+{
+  // Do noise multiplications in the range [flo, fhi).
+  // In case we are parallelizing the noise multiplication, this lets us
+  // break up DoNoiseMultiplication into pieces easily.
+  // (If we are not parallelizing, the penalty is probably zero.)
+  for(size_t f = flo; f < fhi; f++) {
     size_t StartIndex = 2*fChannels.size()*f;
     size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
@@ -1140,11 +1183,6 @@ void EXORefitSignals::DoNoiseMultiplication()
                 1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], fNoiseColumnLength,
                 0, &fNoiseMulResult[StartIndex], fNoiseColumnLength);
   }
-  fWatches["DoNoiseMultiplication"].Stop();
-
-  // Clean up, to be ready for the next call.
-  fNoiseMulQueue.clear(); // Hopefully doesn't free memory, since I'll need it again.
-  fNumVectorsInQueue = 0;
 }
 
 std::vector<double> EXORefitSignals::DoInvLPrecon(std::vector<double>& in, EventHandler& event)

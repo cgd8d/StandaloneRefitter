@@ -155,6 +155,7 @@ class EXORefitSignals
   std::vector<double> fNoiseMulResult;
   size_t fNumVectorsInQueue;
   void DoNoiseMultiplication();
+  void DoNoiseMultiplication_Range(size_t flo, size_t fhi);
   size_t RequestNoiseMul(std::vector<double>& vec,
                          size_t ColLength);
   void FillFromNoise(std::vector<double>& vec,

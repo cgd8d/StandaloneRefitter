@@ -94,8 +94,8 @@ For efficient running on NERSC (edison or hopper), I need to have some kind of m
 * Keep event reading and initial estimation single-threaded for now.
 * Replace the static global workspace with something thread-safe.
 
+Currently, to use threads I'm requiring "-DUSE_THREADS -DNUM_THREADS=6" or the like.
 
-
-
+Thread management of noise multiplication is done.  (That was the easy one.)
 
 
