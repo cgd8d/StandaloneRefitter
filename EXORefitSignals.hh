@@ -22,10 +22,6 @@ class TH3D;
 class TGraph;
 class TTree;
 
-// Some functions just need a short-term place to put things in. (Eg. out-of-place MKL operations.)
-// This way, they reuse the memory and reduce the number of reallocations.
-static std::vector<double> Workspace;
-
 class EXORefitSignals
 {
  public:
@@ -245,7 +241,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
     ExpectedYields.push_back(event.fExpectedYieldPerGang.at(fChannels[k]));
   }
-  Workspace.resize(ExpectedYields.size());
+  std::vector<double> Workspace(ExpectedYields.size(), 0);
   for(size_t f = 0; f <= fMaxF - fMinF; f++) {
     size_t StartIndex = 2*fChannels.size()*f + fFirstAPDChannelIndex;
 

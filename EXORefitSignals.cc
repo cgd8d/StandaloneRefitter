@@ -1249,19 +1249,18 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
   fWatches["DoInvRPrecon"].Stop();
   DoLagrangeAndConstraintMul<'L'>(out, out, event); // out = {{LX^(-1)v2} {X^(-1)v2}}
   fWatches["DoInvRPrecon"].Start(false);
-
-  // Using MKL, diamm and omatadd are both out-of-place.
-  // Use the static global workspace.
   fWatches["DoInvRPrecon (part 2)"].Start(false);
-  Workspace.resize(fNoiseColumnLength*(event.fWireModel.size()+1));
 
-  ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
-         &fInvSqrtNoiseDiag[0], &out[0], event.fColumnLength,
-         &Workspace[0], fNoiseColumnLength); // Workspace = D^(-1/2)LX^(-1)v2
-  MKL_Domatadd('C', 'N', 'N', fNoiseColumnLength, event.fWireModel.size()+1,
-               -1, &Workspace[0], fNoiseColumnLength,
-               1, &in[0], event.fColumnLength,
-               &out[0], event.fColumnLength); // out = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
+  // Although there is MKL functionality to do the following, it requires a fairly large buffer
+  // to perform out-of-place arithmetic.
+  // It is probably more effective to just do the looping ourselves in an intelligent manner.
+  for(size_t i = 0; i < fNoiseColumnLength; i++) {
+    double InvSqrtNoise = fInvertSqrtNoiseDiag[i];
+    for(size_t j = 0; j < event.fWireModel.size()+1; j++) {
+      size_t Index = i + j*fColumnLength;
+      out[Index] = in[Index] - InvSqrtNoise*out[Index];
+    }
+  } // out = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
   fWatches["DoInvRPrecon (part 2)"].Stop();
   fWatches["DoInvRPrecon"].Stop();
   return out;
@@ -1308,17 +1307,16 @@ std::vector<double> EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHan
               1, &event.fPreconX[0], event.fWireModel.size()+1,
               &out[fNoiseColumnLength], event.fColumnLength); // out = {{Lv2} {Xv2}}
 
-  // Using MKL, diamm and omatadd are both out-of-place.
-  // Use the static global workspace.
-  Workspace.resize(fNoiseColumnLength*(event.fWireModel.size()+1));
-
-  ddiamm(fNoiseColumnLength, event.fWireModel.size()+1, fNoiseColumnLength,
-         &fInvSqrtNoiseDiag[0], &out[0], event.fColumnLength,
-         &Workspace[0], fNoiseColumnLength); // Workspace = D^(-1/2)Lv2
-  MKL_Domatadd('C', 'N', 'N', fNoiseColumnLength, event.fWireModel.size()+1,
-               1, &Workspace[0], fNoiseColumnLength,
-               1, &in[0], event.fColumnLength,
-               &out[0], event.fColumnLength); // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
+  // Although there is MKL functionality to do the following, it requires a fairly large buffer
+  // to perform out-of-place arithmetic.
+  // It is probably more effective to just do the looping ourselves in an intelligent manner.
+  for(size_t i = 0; i < fNoiseColumnLength; i++) {
+    double InvSqrtNoise = fInvertSqrtNoiseDiag[i];
+    for(size_t j = 0; j < event.fWireModel.size()+1; j++) {
+      size_t Index = i + j*fColumnLength;
+      out[Index] = in[Index] + InvSqrtNoise*out[Index];
+    }
+  } // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
   fWatches["DoRPrecon"].Stop();
   return out;
 }
