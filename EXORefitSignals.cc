@@ -767,29 +767,37 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fX = DoInvLPrecon(event->fX, *event);
   event->fX = DoInvRPrecon(event->fX, *event); // Beginning of multiplying by matrix.
 
-  // Push event onto the list of event handlers.
-  fEventHandlerList.push_back(event);
-
   // Request a matrix multiplication of X.
   event->fResultIndex = RequestNoiseMul(event->fX, event->fColumnLength);
   fNumEventsHandled++; // One more event that will be actually handled.
   fNumSignalsHandled += event->fWireModel.size() + 1;
 
+  // Push event onto the list of event handlers.
+#ifdef USE_THREADS
+  assert(fEventHandlerQueue.unsynchronized_push(event));
+#else
+  fEventHandlerQueue.push(event);
+#endif
+
+#ifdef USE_THREADS
+  // Ensure that fEventHandlerResults has enough nodes reserved to accept all of the queued events.
+  // Unfortunately, the only way I know to do this is really awkward.
+  assert(fEventHandlerResults.empty());
+  while(not fEventHandlerQueue.empty()) {
+    EventHandler* evt = NULL;
+    assert(fEventHandlerQueue.unsynchronized_pop(evt));
+    assert(fEventHandlerResults.unsynchronized_push(evt));
+  }
+  while(not fEventHandlerResults.empty()) {
+    EventHandler* evt = NULL;
+    assert(fEventHandlerResults.unsynchronized_pop(evt));
+    assert(fEventHandlerQueue.unsynchronized_push(evt));
+  }
+#endif
+
   // Now, while there are enough requests in the queue, satisfy those requests.
   while(fNumVectorsInQueue > 40) {
-    DoNoiseMultiplication();
-    std::list<EventHandler*>::iterator it = fEventHandlerList.begin();
-    while(it != fEventHandlerList.end()) {
-      bool Result = DoBlBiCGSTAB(**it);
-      if(Result) {
-        // This event is done.
-        FinishEvent(*it); // Deletes the EventHandler object.
-        it = fEventHandlerList.erase(it); // Removes it from the list.
-      }
-      else {
-        it++;
-      }
-    }
+    DoPassThroughEvents();
     if(fNumVectorsInQueue == 0 xor fEventHandlerList.empty()) { // Sanity check.
       LogEXOMsg("Inconsistent state between fNumVectorsInQueue and fEventHandlerList", EEAlert);
     }
@@ -800,21 +808,8 @@ void EXORefitSignals::FlushEvents()
 {
   // Finish processing for all events in the event handler list,
   // regardless of how many pending multiplication requests are queued.
-
-  while(not fEventHandlerList.empty()) {
-    DoNoiseMultiplication();
-    std::list<EventHandler*>::iterator it = fEventHandlerList.begin();
-    while(it != fEventHandlerList.end()) {
-      bool Result = DoBlBiCGSTAB(**it);
-      if(Result) {
-        // This event is done.
-        FinishEvent(*it); // Deletes the EventHandler object.
-        it = fEventHandlerList.erase(it); // Removes it from the list.
-      }
-      else {
-        it++;
-      }
-    }
+  while(not fEventHandlerQueue.empty()) {
+    DoPassThroughEvents();
     if(fNumVectorsInQueue == 0 xor fEventHandlerList.empty()) { // Sanity check.
       LogEXOMsg("Inconsistent state between fNumVectorsInQueue and fEventHandlerList", EEAlert);
     }
@@ -1417,4 +1412,68 @@ std::pair<double, double> EXORefitSignals::EstimateConditionNumber(EventHandler&
     }
   }
   return std::make_pair(Min, Max);
+}
+
+void EXORefitSignals::HandleEventsInThread()
+{
+  // Function for a thread to keep grabbing events to handle until no more exist.
+  EventHandler* evt = NULL;
+#ifdef USE_THREADS
+  while(fEventHandlerQueue.pop(evt)) {
+#else
+  while(not fEventHandlerQueue.empty()) {
+    evt = fEventHandlerQueue.front();
+    fEventHandlerQueue.pop();
+#endif
+    // We just drew an event pointer from the queue; handle it.
+    bool Result = DoBlBiCGSTAB(*evt);
+    if(Result) {
+      // This event is done.
+      FinishEvent(evt); // Deletes the EventHandler object.
+    }
+    else {
+      // This event is not done, so it must have requested a noise multiplication.
+#ifdef USE_THREADS
+      // boost::lockfree::queue returns true if successful, which it should always be.
+      // In other words, we should always have allocated sufficient space before creating threads.
+      assert(fEventHandlerResults.bounded_push(evt));
+#else
+      fEventHandlerResults.push(evt);
+#endif
+    }
+  }
+}
+
+void EXORefitSignals::DoPassThroughEvents()
+{
+  // Do a pass through the event handlers we've accumulated;
+  // do a round of noise multiplication followed by a round of BiCGSTAB.
+  DoNoiseMultiplication();
+  assert(fEventHandlerResults.empty());
+#ifdef USE_THREADS
+  fEventHandlerResults.reserve_unsafe(fEventHandlerQueue.size());
+  boost::thread::thread_group threads;
+  for(size_t i = 0; i < (NUM_THREADS)-1; i++) {
+    threads.add_thread(new boost::thread(EXORefitSignals::HandleEventsInThread, this));
+  }
+#endif
+  // This thread is the last one.
+  // If we're in unthreaded code, this thread is the only one.
+  HandleEventsInThread();
+#ifdef USE_THREADS
+  threads.join_all();
+#endif
+  assert(fEventHandlerQueue.empty());
+
+  // Transfer entries from results into queue.
+  while(not fEventHandlerResults.empty()) {
+#ifdef USE_THREADS
+    EventHandler* evt = NULL;
+    assert(fEventHandlerResults.unsynchronized_pop(evt));
+    assert(fEventHandlerQueue.unsynchronized_push(evt));
+#else
+    fEventHandlerQueue.push(fEventHandlerResults.front());
+    fEventHandlerResults.pop();
+#endif
+  }
 }

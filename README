@@ -93,9 +93,9 @@ For efficient running on NERSC (edison or hopper), I need to have some kind of m
 * Looping through frequency blocks of noise multiplication, manage a pool again.
 * Keep event reading and initial estimation single-threaded for now.
 * Replace the static global workspace with something thread-safe.
+* Make watches thread-safe.  Check that ROOT shared structures (Lightmap, etc) can be read thread-safely.
 
 Currently, to use threads I'm requiring "-DUSE_THREADS -DNUM_THREADS=6" or the like.
 
-Thread management of noise multiplication is done.  (That was the easy one.)
-
+OK -- in principle I've done most of it.  What remains is ensuring all stopwatches are handled in sequential parts of the code, and ensuring other ROOT structures (lightmap etc) are not changing behind the scenes when I access them.
 
