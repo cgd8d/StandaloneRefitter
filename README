@@ -99,3 +99,6 @@ Currently, to use threads I'm requiring "-DUSE_THREADS -DNUM_THREADS=6" or the l
 
 OK -- in principle I've done most of it.  What remains is ensuring all stopwatches are handled in sequential parts of the code, and ensuring other ROOT structures (lightmap etc) are not changing behind the scenes when I access them.
 
+Once I eliminate TStopwatches, the only EXOAnalysis/ROOT code which will be touched in parallel is TGraph::Eval.  Provided I call without a spline and with no options, that function is thread-safe.
+
+OK -- TStopwatches have been eliminated where necessary.  In principle the code is ready to go; still to be tested.

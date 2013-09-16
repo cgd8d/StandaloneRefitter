@@ -211,7 +211,6 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   // (trans(L)D^(-1/2) 0        )
   assert(WHICH == 'L' or WHICH == 'C' or WHICH == 'A');
   assert(WHICH == 'L' or WHICH == 'C' or &in[0] != &out[0]);
-  fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH)].Start(false);
   bool Lagrange = (WHICH == 'L' or WHICH == 'A');
   bool Constraint = (WHICH == 'C' or WHICH == 'A');
 
@@ -249,7 +248,6 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   // This is where most of the time is spent, because we need to loop through all APD channels.
   // Furthermore, the APD channels are grouped together, making this portion of the code more matrix-friendly.
   // So, we exploit MKL as much as possible.
-  fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH).append(", apds")].Start(false);
   std::vector<double> ExpectedYields;
   for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
     ExpectedYields.push_back(event.fExpectedYieldPerGang.at(fChannels[k]));
@@ -294,7 +292,5 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
                   1, &out[StartIndex], event.fColumnLength);
     }
   }
-  fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH).append(", apds")].Stop();
-  fWatches[std::string("DoLagrangeAndConstraintMul, WHICH = ").append(1, WHICH)].Stop();
 }
 #endif
