@@ -45,6 +45,17 @@
 #include <algorithm>
 #include <fstream>
 
+#ifdef USE_THREADS
+// We currently use the boost::threads library, if threading is enabled.
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/thread.hpp>
+#include <boost/thread/thread_group.hpp>
+
+// Create basic mutexes for two multiple-writer situations.
+boost::mutex FinishEventMutex; // tinput and toutput are not thread-safe.
+boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
+#endif
+
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
                                  EXOTreeOutputModule& outputModule)
@@ -814,6 +825,11 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 {
   // Compute and fill denoised signals, as appropriate.
   // Then pass the filled event to the output module.
+
+#ifdef USE_THREADS
+  FinishEventMutex.lock(); // Wait until we get a lock.
+#endif
+
   EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
 
   // We need to clear out the denoised information here, since we just freshly read the event from file.
@@ -900,6 +916,11 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   } // End setting of denoised energy signals.
 
   fOutputModule.ProcessEvent(ED);
+
+#ifdef USE_THREADS
+  FinishEventMutex.unlock(); // Release access to tinput and toutput for other threads.
+#endif
+
   delete event;
 }
 
@@ -1307,12 +1328,18 @@ size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
 {
   // Request a noise multiplication on vec.
   // Return value indicates where to retrieve results.
-  assert(fNoiseColumnLength <= ColLength);
-  assert(vec.size() % ColLength == 0);
   fWatches["RequestNoiseMul"].Start(false);
 
+  assert(fNoiseColumnLength <= ColLength);
+  assert(vec.size() % ColLength == 0);
   size_t NumCols = vec.size() / ColLength;
+
+#ifdef USE_THREADS
+  RequestNoiseMulMutex.lock(); // Lock the shared noise multiplication queue for this thread.
+#endif
+
   size_t InitSize = fNoiseMulQueue.size();
+  assert(InitSize == fNumVectorsInQueue*fNoiseColumnLength);
   fNoiseMulQueue.reserve(InitSize + NumCols*fNoiseColumnLength);
   for(size_t i = 0; i < NumCols; i++) {
     fNoiseMulQueue.insert(fNoiseMulQueue.end(),
@@ -1320,6 +1347,11 @@ size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
                           vec.begin() + i*ColLength + fNoiseColumnLength);
   }
   fNumVectorsInQueue += NumCols;
+
+#ifdef USE_THREADS
+  RequestNoiseMulMutex.unlock();
+#endif
+
   fWatches["RequestNoiseMul"].Stop();
   return InitSize;
 }
