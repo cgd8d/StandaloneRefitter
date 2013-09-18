@@ -15,14 +15,11 @@
 //
 
 #include "EXORefitSignals.hh"
-#include "EXOAnalysisManager/EXOGridCorrectionModule.hh"
 #include "EXOAnalysisManager/EXOTreeInputModule.hh"
 #include "EXOAnalysisManager/EXOTreeOutputModule.hh"
 #include "EXOCalibUtilities/EXOChannelMapManager.hh"
 #include "EXOCalibUtilities/EXOElectronicsShapers.hh"
 #include "EXOCalibUtilities/EXOUWireGains.hh"
-#include "EXOCalibUtilities/EXOLifetimeCalib.hh"
-#include "EXOCalibUtilities/EXOGridCorrectionCalib.hh"
 #include "EXOUtilities/EXOEventData.hh"
 #include "EXOUtilities/EXODigitizeWires.hh"
 #include "EXOUtilities/EXOWaveform.hh"
@@ -49,7 +46,7 @@
 // We currently use the boost::threads library, if threading is enabled.
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/thread.hpp>
-#include <boost/thread/thread_group.hpp>
+#include <boost/thread/detail/thread_group.hpp>
 
 // Create basic mutexes for two multiple-writer situations.
 boost::mutex FinishEventMutex; // tinput and toutput are not thread-safe.
@@ -140,8 +137,8 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   fNoiseDiag.clear();
   fNoiseDiag.reserve(fNoiseColumnLength);
   assert(NoiseFile.open(fNoiseFilename.c_str(), std::ios_base::in | std::ios_base::binary) != NULL);
-  assert(outfile.pubseekoff(0, std::ios_base::beg, std::ios_base::in) == 0);
-  assert(outfile.pubseekoff(0, std::ios_base::end, std::ios_base::in) ==
+  assert(NoiseFile.pubseekoff(0, std::ios_base::beg, std::ios_base::in) == 0);
+  assert(NoiseFile.pubseekoff(0, std::ios_base::end, std::ios_base::in) ==
          FileNumChannels*FileNumChannels*(4*1023+1)*sizeof(double));
   assert(sizeof(double) == 8);
   assert(fMinF == 1); // Else I'll need to generalize the code that produces these files.
@@ -796,24 +793,14 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 #endif
 
   // Now, while there are enough requests in the queue, satisfy those requests.
-  while(fNumVectorsInQueue > 40) {
-    DoPassThroughEvents();
-    if(fNumVectorsInQueue == 0 xor fEventHandlerList.empty()) { // Sanity check.
-      LogEXOMsg("Inconsistent state between fNumVectorsInQueue and fEventHandlerList", EEAlert);
-    }
-  }
+  while(fNumVectorsInQueue > 40) DoPassThroughEvents();
 }
 
 void EXORefitSignals::FlushEvents()
 {
   // Finish processing for all events in the event handler list,
   // regardless of how many pending multiplication requests are queued.
-  while(not fEventHandlerQueue.empty()) {
-    DoPassThroughEvents();
-    if(fNumVectorsInQueue == 0 xor fEventHandlerList.empty()) { // Sanity check.
-      LogEXOMsg("Inconsistent state between fNumVectorsInQueue and fEventHandlerList", EEAlert);
-    }
-  }
+  while(not fEventHandlerQueue.empty()) DoPassThroughEvents();
 }
 
 void EXORefitSignals::FinishEvent(EventHandler* event)
@@ -1138,14 +1125,14 @@ void EXORefitSignals::DoNoiseMultiplication()
 
   for(size_t i = 0; i < threads_with_extra; i++) {
     size_t flo = i*(frequencies_per_thread+1);
-    threads.add_thread(new boost::thread(EXORefitSignals::DoNoiseMultiplication_Range,
+    threads.add_thread(new boost::thread(&EXORefitSignals::DoNoiseMultiplication_Range,
                                          this,
                                          flo,
-                                         flo + frequencies_per_thread + 1));
+                                         size_t(flo + frequencies_per_thread + 1)));
   }
   for(size_t i = threads_with_extra; i < (NUM_THREADS)-1; i++) {
     size_t flo = threads_with_extra + i*frequencies_per_thread;
-    threads.add_thread(new boost::thread(EXORefitSignals::DoNoiseMultiplication_Range,
+    threads.add_thread(new boost::thread(&EXORefitSignals::DoNoiseMultiplication_Range,
                                          this,
                                          flo,
                                          flo + frequencies_per_thread));
@@ -1156,7 +1143,7 @@ void EXORefitSignals::DoNoiseMultiplication()
   threads.join_all();
 #else
   // The sequential version.
-  DoNoise_Multiplication_Range(0, (fMaxF-fMinF+2)); // to handle [0, fMaxF-fMinF+1], inclusive.
+  DoNoiseMultiplication_Range(0, (fMaxF-fMinF+2)); // to handle [0, fMaxF-fMinF+1], inclusive.
 #endif
   fWatches["DoNoiseMultiplication"].Stop();
 
@@ -1220,9 +1207,9 @@ std::vector<double> EXORefitSignals::DoInvRPrecon(std::vector<double>& in, Event
   // to perform out-of-place arithmetic.
   // It is probably more effective to just do the looping ourselves in an intelligent manner.
   for(size_t i = 0; i < fNoiseColumnLength; i++) {
-    double InvSqrtNoise = fInvertSqrtNoiseDiag[i];
+    double InvSqrtNoise = fInvSqrtNoiseDiag[i];
     for(size_t j = 0; j < event.fWireModel.size()+1; j++) {
-      size_t Index = i + j*fColumnLength;
+      size_t Index = i + j*event.fColumnLength;
       out[Index] = in[Index] - InvSqrtNoise*out[Index];
     }
   } // out = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
@@ -1267,9 +1254,9 @@ std::vector<double> EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHan
   // to perform out-of-place arithmetic.
   // It is probably more effective to just do the looping ourselves in an intelligent manner.
   for(size_t i = 0; i < fNoiseColumnLength; i++) {
-    double InvSqrtNoise = fInvertSqrtNoiseDiag[i];
+    double InvSqrtNoise = fInvSqrtNoiseDiag[i];
     for(size_t j = 0; j < event.fWireModel.size()+1; j++) {
-      size_t Index = i + j*fColumnLength;
+      size_t Index = i + j*event.fColumnLength;
       out[Index] = in[Index] + InvSqrtNoise*out[Index];
     }
   } // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
@@ -1406,9 +1393,9 @@ void EXORefitSignals::DoPassThroughEvents()
   assert(fEventHandlerResults.empty());
 #ifdef USE_THREADS
   fEventHandlerResults.reserve_unsafe(fEventHandlerQueue.size());
-  boost::thread::thread_group threads;
+  boost::thread_group threads;
   for(size_t i = 0; i < (NUM_THREADS)-1; i++) {
-    threads.add_thread(new boost::thread(EXORefitSignals::HandleEventsInThread, this));
+    threads.add_thread(new boost::thread(&EXORefitSignals::HandleEventsInThread, this));
   }
 #endif
   // This thread is the last one.
