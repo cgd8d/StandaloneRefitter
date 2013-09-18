@@ -24,7 +24,7 @@ $EXOAnalysis_SRC/analysis/manager/build/EXOAnalysisModuleFactory.o \
 $EXOAnalysis_SRC/utilities/calib/build/*.o \
 $EXOAnalysis_SRC/utilities/database/build/*.o \
 $EXOAnalysis_SRC/utilities/misc/build/*.o \
--lboost_thread \
+-lboost_thread -lboost_system \
 -lmysqlclient \
 -Wl,--start-group -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -Wl,--end-group \
 -lRoot -lpcre -lfreetype -lAfterImage \

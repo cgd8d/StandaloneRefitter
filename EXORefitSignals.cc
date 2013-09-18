@@ -1392,7 +1392,6 @@ void EXORefitSignals::DoPassThroughEvents()
   DoNoiseMultiplication();
   assert(fEventHandlerResults.empty());
 #ifdef USE_THREADS
-  fEventHandlerResults.reserve_unsafe(fEventHandlerQueue.size());
   boost::thread_group threads;
   for(size_t i = 0; i < (NUM_THREADS)-1; i++) {
     threads.add_thread(new boost::thread(&EXORefitSignals::HandleEventsInThread, this));
