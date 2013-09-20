@@ -82,23 +82,16 @@ With the important goals of:
 
 
 
+Multi-threaded code: in principle, it's ready to go.  I continue linking to the sequential MKL, and exploit instead the higher-level parallelism of the code.  For multiplying by the noise matrix, I distribute frequency ranges to the various cores; for the rest of BiCGSTAB, I distribute events.  The noise matrix and executable image only need to be stored once, which is the source of savings.  Note that because we're entirely within one process, it is easy to ensure the noise matrix doesn't change differently in the different streams.
+To use, compile with
+-DUSE_THREADS -DNUM_THREADS=6 (hopper)
+-DUSE_THREADS -DNUM_THREADS=12 (edison)
+The number of threads is chosen so we fill one NUMA per process.
+
+The other possible way to save memory is with shared memory; we can place one noise matrix in shared memory and access it from 6/12 independent processes.  This is a simpler model to work with, but offers less significant potential for gain.  (Still need N executable images, which may be large; and joining the columns from all of the separate processes would be quite difficult.)  Still, should bear this in mind in case threads are difficult to make work, since this does offer safety and some insulation from ROOT peculiarities.
 
 
-For efficient running on NERSC (edison or hopper), I need to have some kind of multi-threading which lets me run multi-threaded processes efficiently.  In all cases, I can achieve this most efficiently by managing the thread pools myself -- for noise multiplication I can dispatch frequency blocks to independent threads, and for the rest of solving I can handle whole events in parallel. This requires:
 
-* Keep linking to the sequential version of MKL.
-* Looping through BiCGSTAB finish-up, manage a pool of N threads and finish events one at a time.
-	Use a lock on writing events to output.
-	Use a lock on writing noise multiplication requests.
-* Looping through frequency blocks of noise multiplication, manage a pool again.
-* Keep event reading and initial estimation single-threaded for now.
-* Replace the static global workspace with something thread-safe.
-* Make watches thread-safe.  Check that ROOT shared structures (Lightmap, etc) can be read thread-safely.
 
-Currently, to use threads I'm requiring "-DUSE_THREADS -DNUM_THREADS=6" or the like.
 
-OK -- in principle I've done most of it.  What remains is ensuring all stopwatches are handled in sequential parts of the code, and ensuring other ROOT structures (lightmap etc) are not changing behind the scenes when I access them.
 
-Once I eliminate TStopwatches, the only EXOAnalysis/ROOT code which will be touched in parallel is TGraph::Eval.  Provided I call without a spline and with no options, that function is thread-safe.
-
-OK -- TStopwatches have been eliminated where necessary.  In principle the code is ready to go; still to be tested.
