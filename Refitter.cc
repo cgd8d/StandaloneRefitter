@@ -26,6 +26,7 @@ Should be called like:
 
 int main(int argc, char** argv)
 {
+  std::cout<<"Entered program."<<std::endl;
   if(argc < 4) {
     std::cout<<"Usage: ./Refit <InputProcessedFile> <InputWaveformFile> <OutputFile>"<<std::endl;
     std::exit(1);
@@ -36,7 +37,9 @@ int main(int argc, char** argv)
   if(argc >= 6) NumEntries = std::atol(argv[5]);
 
   EXOTreeInputModule InputModule;
+  std::cout<<"About to set filename."<<std::endl;
   InputModule.SetFilename(argv[1]);
+  std::cout<<"Successfully set filename."<<std::endl;
   TFile WaveformFile(argv[2]);
   TTree* WaveformTree = dynamic_cast<TTree*>(WaveformFile.Get("tree"));
 
@@ -46,8 +49,13 @@ int main(int argc, char** argv)
   OutputModule.BeginOfRun(NULL); // OK, fine -- shortcut here, I assume input has only one run.
 
   EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
-  RefitSig.SetLightmapFilename("/scratch1/scratchdirs/claytond/LightMaps.root");
-  RefitSig.SetNoiseFilename("/scratch1/scratchdirs/claytond/noise_manyruns_withuwires_100000.dat");
+#ifdef HOPPER
+  RefitSig.SetLightmapFilename("/scratch2/scratchdirs/claytond/LightMaps.root");
+  RefitSig.SetNoiseFilename("/scratch2/scratchdirs/claytond/noise_manyruns_withuwires_100000.dat");
+#else
+  RefitSig.SetLightmapFilename("LightMaps.root");
+  RefitSig.SetNoiseFilename("noise_manyruns_withuwires_100000.dat");
+#endif
   RefitSig.SetRThreshold(0.1);
   RefitSig.Initialize();
 

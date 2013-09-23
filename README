@@ -91,7 +91,11 @@ The number of threads is chosen so we fill one NUMA per process.
 The other possible way to save memory is with shared memory; we can place one noise matrix in shared memory and access it from 6/12 independent processes.  This is a simpler model to work with, but offers less significant potential for gain.  (Still need N executable images, which may be large; and joining the columns from all of the separate processes would be quite difficult.)  Still, should bear this in mind in case threads are difficult to make work, since this does offer safety and some insulation from ROOT peculiarities.
 
 
-
-
+Running on hopper: Edison is down until Sunday; might as well focus on getting things running on Hopper.
+Things that I can work on:
+	Make sure I don't kill nodes anymore.
+	Understanding what is a truly minimal installation. (Were any third-party libraries non-essential?)
+	Installing a more current boost; or making the code work without lockfree.
+	Converting code to optionally work with either ACML or MKL. (ACML documentation is terrible.)
 
 
