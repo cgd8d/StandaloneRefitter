@@ -16,6 +16,7 @@ Should be called like:
 
 #include "EXORefitSignals.hh"
 #include "EXOUtilities/EXOEventData.hh"
+#include "EXOCalibUtilities/EXOCalibManager.hh"
 #include "EXOAnalysisManager/EXOTreeInputModule.hh"
 #include "EXOAnalysisManager/EXOTreeOutputModule.hh"
 #include "TFile.h"
@@ -50,7 +51,8 @@ int main(int argc, char** argv)
 
   EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
 #ifdef HOPPER
-  RefitSig.SetLightmapFilename("/scratch2/scratchdirs/claytond/LightMaps.root");
+  // NERSC compute nodes do not permit outgoing internet connections?
+  EXOCalibManager::GetCalibManager().SetMetadataAccessType("text");
   RefitSig.SetNoiseFilename("/scratch2/scratchdirs/claytond/noise_manyruns_withuwires_100000.dat");
 #else
   RefitSig.SetLightmapFilename("LightMaps.root");
