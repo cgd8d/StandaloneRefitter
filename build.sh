@@ -6,19 +6,40 @@
 #PBS -j oe
 #PBS -V
 
-export CRAY_ROOTFS=DSL
-cd $PBS_O_WORKDIR
+if [ -z "$NERSC_HOST" ]; then
+	# Running at SLAC.
+	export CXX=g++
+	export LOCATION=SLAC
+else
+	# Running at NERSC
+	export CRAY_ROOTFS=DSL
+	cd $PBS_O_WORKDIR
+	export CXX=/opt/gcc/4.7.2/snos/bin/g++
+	export APRUN="aprun -n 1"
+	if [ "$NERSC_HOST" = "hopper" ]; then
+		export LOCATION=HOPPER
+		# Make multi-threaded when boost 1.53+ is installed -- ticket has been placed.
+		# export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6"
+		# export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
+	elif [ "$NERSC_HOST" = "edison" ]; then
+		export LOCATION=EDISON
+		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=12"
+		export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
+	else
+		echo "No match to nersc host."
+		exit 1
+	fi
+fi
 
 # At NERSC -- will require adaptation for SLAC, of course.
-aprun -n 1 /opt/gcc/4.7.2/snos/bin/g++ -O3 -pthread \
-`root-config --cflags` -I`exo-config --incdir` -DHAVE_TYPE_TRAITS=1 -DHOPPER \
+$APRUN $CXX -O3 -pthread \
+`root-config --cflags` -I`exo-config --incdir` -DHAVE_TYPE_TRAITS=1 -D$LOCATION $THREAD_MACROS \
 -L`root-config --libdir` -lRIO -lHist -lGraf -lTree \
 -L`exo-config --libdir` -lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities \
 -I$MKL_INC -L$MKL_LIBDIR \
--I$BOOST_DIR/include -L$BOOST_LIB \
+$BOOST_FLAGS \
 -o Refitter \
 Refitter.cc EXORefitSignals.cc \
--lboost_thread -lboost_system \
 -Wl,--start-group -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -Wl,--end-group
 
 # Many of these dependencies are unnecessary -- remove them as time permits.

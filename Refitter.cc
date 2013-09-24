@@ -50,13 +50,13 @@ int main(int argc, char** argv)
   OutputModule.BeginOfRun(NULL); // OK, fine -- shortcut here, I assume input has only one run.
 
   EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
-#ifdef HOPPER
-  // NERSC compute nodes do not permit outgoing internet connections?
   EXOCalibManager::GetCalibManager().SetMetadataAccessType("text");
+#if defined HOPPER
   RefitSig.SetNoiseFilename("/scratch2/scratchdirs/claytond/noise_manyruns_withuwires_100000.dat");
-#else
-  RefitSig.SetLightmapFilename("LightMaps.root");
-  RefitSig.SetNoiseFilename("noise_manyruns_withuwires_100000.dat");
+#elif defined EDISON
+  RefitSig.SetNoiseFilename("/scratch1/scratchdirs/claytond/noise_manyruns_withuwires_100000.dat");
+#elif defined SLAC
+  RefitSig.SetNoiseFilename("/nfs/slac/g/exo_data4/users/cgd8d/rhel5-64/noise_manyruns_withuwires_100000.dat");
 #endif
   RefitSig.SetRThreshold(0.1);
   RefitSig.Initialize();
