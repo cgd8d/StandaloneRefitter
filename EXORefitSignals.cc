@@ -153,7 +153,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     // Go ahead and fetch the entire block from the file.
     // A few rows/columns aren't needed (suppressed or bad channels),
     // but this prevents individual small queries which don't scale well.
-    std::vector<double> FileBlock(FileNumChannels*FileNumChannels*(IsFullBlock ? 4 : 1)*sizeof(double), 0);
+    std::vector<double> FileBlock(FileNumChannels*FileNumChannels*(IsFullBlock ? 4 : 1), 0);
     assert(NoiseFile.pubseekpos(FreqFilePos, std::ios_base::in) == FreqFilePos);
     if(NoiseFile.sgetn((char*)&FileBlock[0], FileBlock.size()*sizeof(double)) !=
        FileBlock.size()*sizeof(double)) {
