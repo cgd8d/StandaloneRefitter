@@ -67,6 +67,10 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
   fThoriumEnergy_keV(2615),
   fMinF(1),
   fMaxF(1024),
+#ifdef USE_THREADS
+  fEventHandlerQueue(0), // The default lockfree constructor is not allowed.
+  fEventHandlerResults(0), // http://boost.2283326.n4.nabble.com/lockfree-Faulty-static-assert-td4635029.html
+#endif
   fNumVectorsInQueue(0)
 {
   fWFEvent = NULL;
