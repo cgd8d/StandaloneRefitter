@@ -14,15 +14,16 @@ else
 	# Running at NERSC
 	export CRAY_ROOTFS=DSL
 	cd $PBS_O_WORKDIR
-	export CXX=/opt/gcc/4.7.2/snos/bin/g++
 	export APRUN="aprun -n 1"
 	if [ "$NERSC_HOST" = "hopper" ]; then
 		export LOCATION=HOPPER
+		export CXX=/opt/gcc/4.7.2/snos/bin/g++
 		# Make multi-threaded when boost 1.53+ is installed -- ticket has been placed.
 		# export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6"
 		# export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
 	elif [ "$NERSC_HOST" = "edison" ]; then
 		export LOCATION=EDISON
+		export CXX=/opt/gcc/4.8.1/snos/bin/g++
 		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=12"
 		export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
 	else
