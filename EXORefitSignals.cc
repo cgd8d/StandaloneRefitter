@@ -1126,6 +1126,8 @@ void EXORefitSignals::DoNoiseMultiplication()
   // threads_with_extra is the number of threads we'll actually give one extra frequency to.
   size_t frequencies_per_thread = (fMaxF-fMinF+1)/(NUM_THREADS); // round down
   size_t threads_with_extra = (fMaxF-fMinF+1) - frequencies_per_thread*(NUM_THREADS);
+  assert(frequencies_per_thread*NUM_THREADS <= fMaxF-fMinF+1);
+  assert(threads_with_extra < NUM_THREADS);
 
   for(size_t i = 0; i < threads_with_extra; i++) {
     size_t flo = i*(frequencies_per_thread+1);
@@ -1143,11 +1145,11 @@ void EXORefitSignals::DoNoiseMultiplication()
   }
   // Don't create the last thread; *this* is the last thread.
   size_t flo = threads_with_extra + ((NUM_THREADS)-1)*frequencies_per_thread;
-  DoNoiseMultiplication_Range(flo, (fMaxF-fMinF+2)); // to handle [0, fMaxF-fMinF+1], inclusive.
+  DoNoiseMultiplication_Range(flo, (fMaxF-fMinF+1)); // to handle [0, fMaxF-fMinF], inclusive.
   threads.join_all();
 #else
   // The sequential version.
-  DoNoiseMultiplication_Range(0, (fMaxF-fMinF+2)); // to handle [0, fMaxF-fMinF+1], inclusive.
+  DoNoiseMultiplication_Range(0, (fMaxF-fMinF+1)); // to handle [0, fMaxF-fMinF], inclusive.
 #endif
   fWatches["DoNoiseMultiplication"].Stop();
 
