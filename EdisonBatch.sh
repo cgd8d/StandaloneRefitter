@@ -1,8 +1,8 @@
 #!/bin/bash
 #PBS -q regular
 #PBS -l mppwidth=24
-#PBS -l walltime=00:30:00
-#PBS -N Refitter_EdisonTest1
+#PBS -l walltime=00:10:00
+#PBS -N Refitter
 #PBS -j oe
 
 export CRAY_ROOTFS=DSL

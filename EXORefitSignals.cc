@@ -1162,9 +1162,13 @@ void EXORefitSignals::DoNoiseMultiplication_Range(size_t flo, size_t fhi)
   // In case we are parallelizing the noise multiplication, this lets us
   // break up DoNoiseMultiplication into pieces easily.
   // (If we are not parallelizing, the penalty is probably zero.)
+  assert(fNoiseMulQueue.size() == fNoiseColumnLength*fNumVectorsInQueue);
+  assert(fNoiseMulResult.size() == fNoiseColumnLength*fNumVectorsInQueue);
+  assert(fNoiseCorrelations.size() >= fhi);
   for(size_t f = flo; f < fhi; f++) {
     size_t StartIndex = 2*fChannels.size()*f;
     size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
+    assert(fNoiseCorrelations[f].size() == BlockSize*BlockSize);
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 BlockSize, fNumVectorsInQueue, BlockSize,
                 1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], fNoiseColumnLength,
