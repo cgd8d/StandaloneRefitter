@@ -942,6 +942,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     }
     // Now precondition R appropriately.
     event.fR = DoInvLPrecon(event.fR, event);
+    // Might as well check if we can terminate right off the bat.  Not impossible!
+    if(CanTerminate(event)) return true;
     // Set up other pieces of the handler.
     event.fP = event.fR;
     event.fR0hat = event.fR;
@@ -1011,27 +1013,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     for(size_t i = 0; i < event.fX.size(); i++) event.fX[i] += omega*event.fR[i];
     // Modify R.
     for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] -= omega*T[i];
-    // Check if we should conclude here -- R is the residual matrix.
-    // Note: for the benefit of preconditioning comparison studies, I will currently terminate based on
-    // the unpreconditioned residual.  That may be the wrong thing to do down the road.
-    bool CanTerminate = true;
-    std::vector<double> R_unprec = DoLPrecon(event.fR, event);
-    for(size_t col = 0; col <= event.fWireModel.size(); col++) {
-      size_t ColIndex = col*event.fColumnLength;
-      size_t NextCol = ColIndex + event.fColumnLength;
-      double Norm = 0;
-      for(size_t i = 0; i < fNoiseColumnLength; i++) {
-        Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i]*fNoiseDiag[i];
-      }
-      for(size_t i = fNoiseColumnLength; i < event.fColumnLength; i++) {
-        Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i];
-      }
-      if(Norm > fRThreshold*fRThreshold) {
-        CanTerminate = false;
-        break;
-      }
-    }
-    if(CanTerminate) return true;
+    // Check if we should conclude here.
+    if(CanTerminate(event)) return true;
     // Now compute beta, solving R0hat_V beta = -R0hat_T
     std::vector<double> Beta((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
@@ -1457,4 +1440,27 @@ void EXORefitSignals::DoPassThroughEvents()
     fEventHandlerResults.pop();
 #endif
   }
+}
+
+bool EXORefitSignals::CanTerminate(EventHandler& event)
+{
+  // Test whether the residual matrix R indicates we can terminate yet.
+  // For now we test for termination against the *unpreconditioned* residual matrix.
+  // This should be compared to the alternative of terminating against the preconditioned residual matrix.
+  std::vector<double> R_unprec = DoLPrecon(event.fR, event);
+
+  for(size_t col = 0; col <= event.fWireModel.size(); col++) {
+    size_t ColIndex = col*event.fColumnLength;
+    size_t NextCol = ColIndex + event.fColumnLength;
+    double Norm = 0;
+    for(size_t i = 0; i < fNoiseColumnLength; i++) {
+      Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i]*fNoiseDiag[i];
+    }
+    for(size_t i = fNoiseColumnLength; i < event.fColumnLength; i++) {
+      Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i];
+    }
+    if(Norm > fRThreshold*fRThreshold) return false;
+  }
+
+  return true;
 }

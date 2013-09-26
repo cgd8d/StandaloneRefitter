@@ -130,6 +130,7 @@ class EXORefitSignals
   double GetGain(unsigned char channel, EventHandler& event) const;
 
   double fRThreshold;
+  bool CanTerminate(EventHandler& event);
 
   // Various stopwatches, to understand the fraction of time spent actually solving the matrix.
   std::map<std::string, TStopwatch> fWatches;
