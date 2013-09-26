@@ -23,29 +23,50 @@ Should be called like:
 #include "TTree.h"
 #include <iostream>
 #include <cstdlib>
-
+#include <fstream>
 
 int main(int argc, char** argv)
 {
   std::cout<<"Entered program."<<std::endl;
-  if(argc < 4) {
-    std::cout<<"Usage: ./Refit <InputProcessedFile> <InputWaveformFile> <OutputFile>"<<std::endl;
-    std::exit(1);
-  }
+  std::string ProcessedFileName;
+  std::string RawFileName;
+  std::string OutFileName;
   Long64_t StartEntry = 0;
-  if(argc >= 5) StartEntry = std::atol(argv[4]);
-  Long64_t NumEntries = 40;
-  if(argc >= 6) NumEntries = std::atol(argv[5]);
+  Long64_t NumEntries = 100;
+
+  if(argc == 2) {
+    std::cout<<"Reading arguments from file \""<<argv[1]<<"\"."<<std::endl;
+    std::ifstream OptionFile(argv[1]);
+    OptionFile >> ProcessedFileName
+               >> RawFileName
+               >> OutFileName
+               >> StartEntry
+               >> NumEntries;
+  }
+  else {
+    assert(argc >= 4);
+    ProcessedFileName = argv[1];
+    RawFileName = argv[2];
+    OutFileName = argv[3];
+    if(argc >= 5) StartEntry = std::atol(argv[4]);
+    if(argc >= 6) NumEntries = std::atol(argv[5]);
+  }
+
+  std::cout<<"Input processed file: "<<ProcessedFileName<<std::endl;
+  std::cout<<"Input raw file: "<<RawFileName<<std::endl;
+  std::cout<<"Output file: "<<OutFileName<<std::endl;
+  std::cout<<"Starting at entry "<<StartEntry<<std::endl;
+  std::cout<<"Handle "<<NumEntries<<" entries."<<std::endl;
 
   EXOTreeInputModule InputModule;
   std::cout<<"About to set filename."<<std::endl;
-  InputModule.SetFilename(argv[1]);
+  InputModule.SetFilename(ProcessedFileName);
   std::cout<<"Successfully set filename."<<std::endl;
-  TFile WaveformFile(argv[2]);
+  TFile WaveformFile(RawFileName.c_str());
   TTree* WaveformTree = dynamic_cast<TTree*>(WaveformFile.Get("tree"));
 
   EXOTreeOutputModule OutputModule;
-  OutputModule.SetOutputFilename(argv[3]);
+  OutputModule.SetOutputFilename(OutFileName);
   OutputModule.Initialize();
   OutputModule.BeginOfRun(NULL); // OK, fine -- shortcut here, I assume input has only one run.
 
