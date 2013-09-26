@@ -766,10 +766,10 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     event->fX[Index] = 1; // All models are normalized to 1.
   }
   event->fX = DoInvLPrecon(event->fX, *event);
-  event->fX = DoInvRPrecon(event->fX, *event); // Beginning of multiplying by matrix.
+  event->fprecon_tmp = DoInvRPrecon(event->fX, *event); // Beginning of multiplying by matrix.
 
   // Request a matrix multiplication of X.
-  event->fResultIndex = RequestNoiseMul(event->fX, event->fColumnLength);
+  event->fResultIndex = RequestNoiseMul(event->fprecon_tmp, event->fColumnLength);
   fNumEventsHandled++; // One more event that will be actually handled.
   fNumSignalsHandled += event->fWireModel.size() + 1;
 
@@ -927,7 +927,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Start by copying result into R.
     FillFromNoise(event.fR, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
-    DoRestOfMultiplication(event.fX, event.fR, event);
+    DoRestOfMultiplication(event.fprecon_tmp, event.fR, event);
     // Now, R <-- B - R = B - AX.
     for(size_t i = 0; i <= event.fWireModel.size(); i++) {
       if(i % event.fColumnLength == fNoiseColumnLength + (i/event.fColumnLength)) {
@@ -937,8 +937,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
         event.fR[i] = -event.fR[i];
       }
     }
-    // Now precondition R and X0 appropriately.
-    event.fX = DoRPrecon(event.fX, event); // To undo the preconditioning done on it directly -- not ideal.
+    // Now precondition R appropriately.
     event.fR = DoInvLPrecon(event.fR, event);
     // Set up other pieces of the handler.
     event.fP = event.fR;
