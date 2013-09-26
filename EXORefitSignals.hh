@@ -94,7 +94,6 @@ class EXORefitSignals
   void SetRThreshold(double threshold) { fRThreshold = threshold; }
   bool fAPDsOnly; // Do not denoise wire signals; and do not use u-wires to denoise APDs.
   bool fUseWireAPDCorrelations; // For now, this isn't higher performance -- just for testing.
-  bool fOnlyEstimateConditionNumbers; // Use for studying the quality of preconditioners.
 
   int Initialize();
   void AcceptEvent(EXOEventData* ED, Long64_t entryNum);
@@ -193,7 +192,6 @@ class EXORefitSignals
   std::vector<double> DoInvRPrecon(std::vector<double>& in, EventHandler& event);
   std::vector<double> DoLPrecon(std::vector<double>& in, EventHandler& event);
   std::vector<double> DoRPrecon(std::vector<double>& in, EventHandler& event);
-  std::pair<double, double> EstimateConditionNumber(EventHandler& event);
 
   // Produce the light model, used on all gangs.
   EXOWaveformFT GetModelForTime(double time) const;
