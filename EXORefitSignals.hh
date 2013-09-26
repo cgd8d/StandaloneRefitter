@@ -70,12 +70,13 @@ struct EventHandler {
   size_t fResultIndex;
 };
 
-#ifdef USE_THREADS
+#ifdef USE_LOCKFREE
 // Use a lock-free queue so that multiple threads can push and pop events to be handled without a manager.
 #include <boost/lockfree/queue.hpp>
 typedef boost::lockfree::queue<EventHandler*> queue_type;
 #else
-// If we're not using threads, don't force boost as a dependency.
+// If we're threading, we'll have to use regular locks around a regular queue.
+// If we're not threading, of course just use a queue anyway.
 #include <queue>
 typedef std::queue<EventHandler*> queue_type;
 #endif
@@ -154,6 +155,8 @@ class EXORefitSignals
   void HandleEventsInThread();
   void DoPassThroughEvents();
   void FinishEvent(EventHandler* event);
+  EventHandler* PopAnEvent();
+  void PushAnEvent(EventHandler* evt);
 
   // Block BiCGSTAB algorithm.
   bool DoBlBiCGSTAB(EventHandler& event);

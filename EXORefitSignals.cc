@@ -51,6 +51,13 @@
 // Create basic mutexes for two multiple-writer situations.
 boost::mutex FinishEventMutex; // tinput and toutput are not thread-safe.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
+
+#ifndef USE_LOCKFREE
+// We'll need additional mutexes to protect our event queues.
+boost::mutex EventQueueMutex;
+boost::mutex EventResultsMutex;
+#endif
+
 #endif
 
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
@@ -67,7 +74,7 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
   fThoriumEnergy_keV(2615),
   fMinF(1),
   fMaxF(1024),
-#ifdef USE_THREADS
+#ifdef USE_LOCKFREE
   fEventHandlerQueue(0), // The default lockfree constructor is not allowed.
   fEventHandlerResults(0), // http://boost.2283326.n4.nabble.com/lockfree-Faulty-static-assert-td4635029.html
 #endif
@@ -774,13 +781,13 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   fNumSignalsHandled += event->fWireModel.size() + 1;
 
   // Push event onto the list of event handlers.
-#ifdef USE_THREADS
+#ifdef USE_LOCKFREE
   assert(fEventHandlerQueue.unsynchronized_push(event));
 #else
   fEventHandlerQueue.push(event);
 #endif
 
-#ifdef USE_THREADS
+#ifdef USE_LOCKFREE
   // Ensure that fEventHandlerResults has enough nodes reserved to accept all of the queued events.
   // Unfortunately, the only way I know to do this is really awkward.
   assert(fEventHandlerResults.empty());
@@ -1360,17 +1367,52 @@ std::pair<double, double> EXORefitSignals::EstimateConditionNumber(EventHandler&
   return std::make_pair(Min, Max);
 }
 
+EventHandler* EXORefitSignals::PopAnEvent()
+{
+  // Return an event to process, or NULL if there isn't one.
+  // Make sure this is thread-safe.
+  EventHandler* evt = NULL;
+#ifdef USE_LOCKFREE
+  if(not fEventHandlerQueue.pop(evt)) evt = NULL;
+#else
+#ifdef USE_THREADS
+  EventQueueMutex.lock();
+#endif
+  if(fEventHandlerQueue.empty()) evt = NULL;
+  else {
+    evt = fEventHandlerQueue.front();
+    fEventHandlerQueue.pop();
+  }
+#ifdef USE_THREADS
+  EventQueueMutex.unlock();
+#endif
+#endif
+  return evt;
+}
+
+void EXORefitSignals::PushAnEvent(EventHandler* evt)
+{
+  // Push an event requiring further processing.
+  // Make sure this is thread-safe.
+#ifdef USE_LOCKFREE
+  // We should have already allocated sufficient space.  (Else, it's not really thread-safe.)
+  assert(fEventHandlerResults.bounded_push(evt));
+#else
+#ifdef USE_THREADS
+  EventResultsMutex.lock();
+#endif
+  fEventHandlerResults.push(evt);
+#ifdef USE_THREADS
+  EventResultsMutex.unlock();
+#endif
+#endif
+}
+
 void EXORefitSignals::HandleEventsInThread()
 {
   // Function for a thread to keep grabbing events to handle until no more exist.
   EventHandler* evt = NULL;
-#ifdef USE_THREADS
-  while(fEventHandlerQueue.pop(evt)) {
-#else
-  while(not fEventHandlerQueue.empty()) {
-    evt = fEventHandlerQueue.front();
-    fEventHandlerQueue.pop();
-#endif
+  while(evt = PopAnEvent()) {
     // We just drew an event pointer from the queue; handle it.
     bool Result = DoBlBiCGSTAB(*evt);
     if(Result) {
@@ -1379,13 +1421,7 @@ void EXORefitSignals::HandleEventsInThread()
     }
     else {
       // This event is not done, so it must have requested a noise multiplication.
-#ifdef USE_THREADS
-      // boost::lockfree::queue returns true if successful, which it should always be.
-      // In other words, we should always have allocated sufficient space before creating threads.
-      assert(fEventHandlerResults.bounded_push(evt));
-#else
-      fEventHandlerResults.push(evt);
-#endif
+      PushAnEvent(evt);
     }
   }
 }
@@ -1412,7 +1448,7 @@ void EXORefitSignals::DoPassThroughEvents()
 
   // Transfer entries from results into queue.
   while(not fEventHandlerResults.empty()) {
-#ifdef USE_THREADS
+#ifdef USE_LOCKFREE
     EventHandler* evt = NULL;
     assert(fEventHandlerResults.unsynchronized_pop(evt));
     assert(fEventHandlerQueue.unsynchronized_push(evt));

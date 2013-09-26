@@ -18,13 +18,13 @@ else
 	if [ "$NERSC_HOST" = "hopper" ]; then
 		export LOCATION=HOPPER
 		export CXX=/opt/gcc/4.7.2/snos/bin/g++
-		# Make multi-threaded when boost 1.53+ is installed -- ticket has been placed.
-		# export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6"
-		# export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
+		# define USE_LOCKFREE when it is made available -- ticked filed.
+		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6"
+		export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
 	elif [ "$NERSC_HOST" = "edison" ]; then
 		export LOCATION=EDISON
 		export CXX=/opt/gcc/4.8.1/snos/bin/g++
-		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=12"
+		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=12 -DUSE_LOCKFREE"
 		export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
 	else
 		echo "No match to nersc host."
