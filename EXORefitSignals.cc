@@ -929,13 +929,9 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, event.fR, event);
     // Now, R <-- B - R = B - AX.
-    for(size_t i = 0; i <= event.fWireModel.size(); i++) {
-      if(i % event.fColumnLength == fNoiseColumnLength + (i/event.fColumnLength)) {
-        event.fR[i] = double(1) - event.fR[i];
-      }
-      else {
-        event.fR[i] = -event.fR[i];
-      }
+    for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] = -event.fR[i];
+    for(size_t i = 0; i < event.fWireModel.size()+1; i++) {
+      event.fR[i*event.fColumnLength + fNoiseColumnLength + i] += 1;
     }
     // Now precondition R appropriately.
     event.fR = DoInvLPrecon(event.fR, event);
