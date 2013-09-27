@@ -874,17 +874,12 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 
     // Translate signal magnitudes into corresponding objects.
     if(not fAPDsOnly) {
-      const EXOUWireGains* GainsFromDatabase = GetCalibrationFor(EXOUWireGains,
-                                                                 EXOUWireGainsHandler,
-                                                                 "source_calibration",
-                                                                 ED->fEventHeader);
       for(size_t i = 0; i < event->fWireModel.size(); i++) {
         size_t sigIndex = event->fWireModel[i].first;
         EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
         double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
                                     (CLHEP::keV * ADC_BITS);
-        double GainCorrection = GainsFromDatabase->GetGainOnChannel(sig->fChannel)/300.0;
-        sig->fDenoisedEnergy = Results[i]*GainCorrection*UWireScalingFactor;
+        sig->fDenoisedEnergy = Results[i]*UWireScalingFactor;
       }
     }
     ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
