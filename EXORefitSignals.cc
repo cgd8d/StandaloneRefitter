@@ -1356,6 +1356,7 @@ void EXORefitSignals::DoPassThroughEvents()
   // do a round of noise multiplication followed by a round of BiCGSTAB.
   DoNoiseMultiplication();
   assert(fEventHandlerResults.empty());
+  fWatches["HandleEvents"].Start(false);
 #ifdef USE_THREADS
   boost::thread_group threads;
   for(size_t i = 0; i < (NUM_THREADS)-1; i++) {
@@ -1368,6 +1369,7 @@ void EXORefitSignals::DoPassThroughEvents()
 #ifdef USE_THREADS
   threads.join_all();
 #endif
+  fWatches["HandleEvents"].Stop();
   assert(fEventHandlerQueue.empty());
 
   // Transfer entries from results into queue.
