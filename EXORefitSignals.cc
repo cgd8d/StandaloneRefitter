@@ -52,6 +52,9 @@
 boost::mutex FinishEventMutex; // tinput and toutput are not thread-safe.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
 
+// And a mutex for writing debugging output from threaded parts of the code.
+boost::mutex CoutMutex;
+
 #ifndef USE_LOCKFREE
 // We'll need additional mutexes to protect our event queues.
 boost::mutex EventQueueMutex;
@@ -1352,8 +1355,10 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
   // Test whether the residual matrix R indicates we can terminate yet.
   // For now we test for termination against the *unpreconditioned* residual matrix.
   // This should be compared to the alternative of terminating against the preconditioned residual matrix.
+  // Permit early return if we're not in verbose mode; if we are, finish to collect all possible information.
   std::vector<double> R_unprec = event.fR;
   DoLPrecon(R_unprec, event);
+  double WorstNorm = 0;
 
   for(size_t col = 0; col <= event.fWireModel.size(); col++) {
     size_t ColIndex = col*event.fColumnLength;
@@ -1365,7 +1370,19 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
     for(size_t i = fNoiseColumnLength; i < event.fColumnLength; i++) {
       Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i];
     }
-    if(Norm > fRThreshold*fRThreshold) return false;
+    if(fVerbose) WorstNorm = std::max(Norm, WorstNorm);
+    else if(Norm > fRThreshold*fRThreshold) return false;
+  }
+
+  if(fVerbose) {
+#ifdef USE_THREADS
+    CoutMutex.lock();
+#endif
+    std::cout<<"Entry "<<event.fEntryNumber<<" has worst norm = "<<WorstNorm<<std::endl;
+#ifdef USE_THREADS
+    CoutMutex.unlock();
+#endif
+    if(WorstNorm > fRThreshold*fRThreshold) return false;
   }
 
   return true;
