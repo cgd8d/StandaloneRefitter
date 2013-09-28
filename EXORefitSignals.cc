@@ -723,6 +723,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // Poisson noise terms.
   // Haven't decided yet whether it's important to include Poisson terms on the diagonal; currently I don't.
   // Find X using trans(X)X = trans(L) D^(-1) L.
+  fWatches["Find H"].Start(false);
   std::vector<double> Temp1(event->fColumnLength * (event->fWireModel.size()+1), 0);
   std::vector<double> Temp2(event->fColumnLength * (event->fWireModel.size()+1), 0);
   for(size_t i = 0; i < event->fWireModel.size()+1; i++) {
@@ -745,10 +746,12 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
         Temp1[i*event->fColumnLength + fNoiseColumnLength + j];
     }
   }
+  fWatches["Find H"].Stop();
 
   // Give a really nice initial guess for X, obtained by solving exactly
   // with the approximate version of the matrix used for preconditioning.
   // Since the RHS only has non-zero entries in the lower square, simplifications are used.
+  fWatches["Initial guess for X"].Start(false);
   event->fX.assign(event->fColumnLength * (event->fWireModel.size()+1), 0);
   for(size_t i = 0; i <= event->fWireModel.size(); i++) {
     size_t Index = (i+1)*event->fColumnLength; // Next column; then subtract.
@@ -757,6 +760,8 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     event->fX[Index] = 1; // All models are normalized to 1.
   }
   DoInvLPrecon(event->fX, *event);
+  fWatches["Initial guess for X"].Stop();
+  fWatches["Initial multiplication request on X"].Start(false);
   event->fprecon_tmp = event->fX;
   DoInvRPrecon(event->fprecon_tmp, *event); // Beginning of multiplying by matrix.
 
@@ -787,6 +792,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     assert(fEventHandlerQueue.unsynchronized_push(evt));
   }
 #endif
+  fWatches["Initial multiplication request on X"].Stop();
 
   // Now, while there are enough requests in the queue, satisfy those requests.
   while(fNumVectorsInQueue > 40) DoPassThroughEvents();
