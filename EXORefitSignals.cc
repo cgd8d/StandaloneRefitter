@@ -1098,6 +1098,7 @@ void EXORefitSignals::DoNoiseMultiplication()
 
   // Do the multiplication -- one call for every frequency.
   fWatches["DoNoiseMultiplication"].Start(false); // Don't count vector allocation.
+  if(fVerbose) std::cout<<"Starting DoNoiseMultiplication."<<std::endl;
 #ifdef USE_THREADS
   boost::thread_group threads;
 
@@ -1131,6 +1132,7 @@ void EXORefitSignals::DoNoiseMultiplication()
   DoNoiseMultiplication_Range(0, (fMaxF-fMinF+1)); // to handle [0, fMaxF-fMinF], inclusive.
 #endif
   fWatches["DoNoiseMultiplication"].Stop();
+  if(fVerbose) std::cout<<"Done with DoNoiseMultiplication."<<std::endl;
 
   // Clean up, to be ready for the next call.
   fNoiseMulQueue.clear(); // Hopefully doesn't free memory, since I'll need it again.
@@ -1315,6 +1317,7 @@ void EXORefitSignals::DoPassThroughEvents()
   DoNoiseMultiplication();
   assert(fEventHandlerResults.empty());
   fWatches["HandleEvents"].Start(false);
+  if(fVerbose) std::cout<<"Starting HandleEvents."<<std::endl;
 #ifdef USE_THREADS
   boost::thread_group threads;
   for(size_t i = 0; i < (NUM_THREADS)-1; i++) {
@@ -1328,6 +1331,7 @@ void EXORefitSignals::DoPassThroughEvents()
   threads.join_all();
 #endif
   fWatches["HandleEvents"].Stop();
+  if(fVerbose) std::cout<<"Done with HandleEvents."<<std::endl;
   assert(fEventHandlerQueue.empty());
 
   // Transfer entries from results into queue.
