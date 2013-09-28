@@ -65,6 +65,7 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  EXOTreeOutputModule& outputModule)
 : fAPDsOnly(false),
   fUseWireAPDCorrelations(true),
+  fVerbose(false),
   fInputModule(inputModule),
   fWFTree(wfTree),
   fOutputModule(outputModule),
@@ -813,6 +814,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 #ifdef USE_THREADS
   FinishEventMutex.lock(); // Wait until we get a lock.
 #endif
+  if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
 
   EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
 
@@ -828,6 +830,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   }
 
   if(not event->fX.empty()) {
+    if(fVerbose) std::cout<<"\tThis entry has denoised results to compute."<<std::endl;
     // Undo preconditioning of X.
     DoInvRPrecon(event->fX, *event);
     for(size_t i = 0; i < event->fX.size(); i++) {
@@ -893,7 +896,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   } // End setting of denoised energy signals.
 
   fOutputModule.ProcessEvent(ED);
-
+  if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
 #ifdef USE_THREADS
   FinishEventMutex.unlock(); // Release access to tinput and toutput for other threads.
 #endif

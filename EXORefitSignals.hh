@@ -94,6 +94,7 @@ class EXORefitSignals
   void SetRThreshold(double threshold) { fRThreshold = threshold; }
   bool fAPDsOnly; // Do not denoise wire signals; and do not use u-wires to denoise APDs.
   bool fUseWireAPDCorrelations; // For now, this isn't higher performance -- just for testing.
+  bool fVerbose;
 
   int Initialize();
   void AcceptEvent(EXOEventData* ED, Long64_t entryNum);
