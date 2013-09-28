@@ -32,16 +32,19 @@ else
 	fi
 fi
 
-# At NERSC -- will require adaptation for SLAC, of course.
+# Should work on Hopper, Edison, or at SLAC.
 $APRUN $CXX -O3 -pthread \
 `root-config --cflags` -I`exo-config --incdir` -DHAVE_TYPE_TRAITS=1 -D$LOCATION $THREAD_MACROS \
 -L`root-config --libdir` -lRIO -lHist -lGraf -lTree \
 -L`exo-config --libdir` -lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities \
 -I$MKL_INC -L$MKL_LIBDIR \
-$BOOST_FLAGS \
 -o Refitter \
 Refitter.cc EXORefitSignals.cc \
--Wl,--start-group -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -Wl,--end-group
+-Wl,-Bstatic \
+$BOOST_FLAGS \
+-Wl,--start-group -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -Wl,--end-group \
+-Wl,-Bdynamic \
+-lrt
 
 # Many of these dependencies are unnecessary -- remove them as time permits.
 #CC -O3 -static \
