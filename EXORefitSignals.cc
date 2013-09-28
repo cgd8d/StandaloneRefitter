@@ -815,6 +815,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   FinishEventMutex.lock(); // Wait until we get a lock.
 #endif
   if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
+  fWatches["FinishEvent (occurs concurrently with HandleEvents threads)"].Start(false);
 
   EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
 
@@ -897,6 +898,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 
   fOutputModule.ProcessEvent(ED);
   if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
+  fWatches["FinishEvent (occurs concurrently with HandleEvents threads)"].Stop();
 #ifdef USE_THREADS
   FinishEventMutex.unlock(); // Release access to tinput and toutput for other threads.
 #endif
