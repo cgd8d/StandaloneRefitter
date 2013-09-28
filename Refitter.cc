@@ -82,7 +82,17 @@ int main(int argc, char** argv)
   RefitSig.SetRThreshold(0.1);
   RefitSig.Initialize();
 
+#ifdef USE_THREADS
+  std::cout<<"Using "<<NUM_THREADS<<" threads."<<std::endl;
+#else
+  std::cout<<"Sequential code."<<std::endl;
+#endif
+#ifdef USE_LOCKFREE
+  std::cout<<"Using the boost::lockfree library."<<std::endl;
+#endif
+
   for(Long64_t entryNum = StartEntry; entryNum < StartEntry + NumEntries; entryNum++) {
+    if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
     EXOEventData* ED = InputModule.GetEvent(entryNum);
     if(ED == NULL) break;
     RefitSig.AcceptEvent(ED, entryNum);
