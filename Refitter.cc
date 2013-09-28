@@ -80,6 +80,7 @@ int main(int argc, char** argv)
   RefitSig.SetNoiseFilename("/nfs/slac/g/exo_data4/users/cgd8d/rhel5-64/noise_manyruns_withuwires_100000.dat");
 #endif
   RefitSig.SetRThreshold(0.1);
+  RefitSig.fVerbose = true;
   RefitSig.Initialize();
 
 #ifdef USE_THREADS
