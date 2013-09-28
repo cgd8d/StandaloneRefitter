@@ -235,11 +235,11 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
         size_t Index2 = 2*fChannels.size()*f + channel_index;
         const size_t DiagIndex = Index2;
         for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-          if(Lagrange) out[Index2] += (Add ? 1 : -1)*modelWF[2*f]*fNoiseDiag[DiagIndex]*in[Index1];
-          if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f]*fNoiseDiag[DiagIndex]*in[Index2];
+          if(Lagrange) out[Index2] += (Add ? 1 : -1)*modelWF[2*f]*fInvSqrtNoiseDiag[DiagIndex]*in[Index1];
+          if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f]*fInvSqrtNoiseDiag[DiagIndex]*in[Index2];
           if(f < fMaxF-fMinF) {
-            if(Lagrange) out[Index2+fChannels.size()] += (Add ? 1 : -1)*modelWF[2*f+1]*fNoiseDiag[DiagIndex+fChannels.size()]*in[Index1];
-            if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f+1]*fNoiseDiag[DiagIndex+fChannels.size()]*in[Index2+fChannels.size()];
+            if(Lagrange) out[Index2+fChannels.size()] += (Add ? 1 : -1)*modelWF[2*f+1]*fInvSqrtNoiseDiag[DiagIndex+fChannels.size()]*in[Index1];
+            if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f+1]*fInvSqrtNoiseDiag[DiagIndex+fChannels.size()]*in[Index2+fChannels.size()];
           }
           Index1 += event.fColumnLength;
           Index2 += event.fColumnLength;
@@ -260,7 +260,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     size_t StartIndex = 2*fChannels.size()*f + fFirstAPDChannelIndex;
 
     // Start with real blocks.
-    vdMul(ExpectedYields.size(), &ExpectedYields[0], &fNoiseDiag[StartIndex], &Workspace[0]);
+    vdMul(ExpectedYields.size(), &ExpectedYields[0], &fInvSqrtNoiseDiag[StartIndex], &Workspace[0]);
     if(Constraint) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                   1, event.fWireModel.size()+1, ExpectedYields.size(),
@@ -279,7 +279,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     // Now do imaginary blocks.
     if(f == fMaxF - fMinF) continue;
     StartIndex += fChannels.size();
-    vdMul(ExpectedYields.size(), &ExpectedYields[0], &fNoiseDiag[StartIndex], &Workspace[0]);
+    vdMul(ExpectedYields.size(), &ExpectedYields[0], &fInvSqrtNoiseDiag[StartIndex], &Workspace[0]);
     if(Constraint) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                   1, event.fWireModel.size()+1, ExpectedYields.size(),
