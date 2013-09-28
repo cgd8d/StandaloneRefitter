@@ -182,22 +182,22 @@ class EXORefitSignals
   void DoPoissonMultiplication(const std::vector<double>& in,
                                std::vector<double>& out,
                                EventHandler& event);
-  template<char WHICH>
+  template<char WHICH, bool Add>
   void DoLagrangeAndConstraintMul(const std::vector<double>& in,
                                   std::vector<double>& out,
                                   EventHandler& event);
 
   // Preconditioner functions.
-  std::vector<double> DoInvLPrecon(std::vector<double>& in, EventHandler& event);
-  std::vector<double> DoInvRPrecon(std::vector<double>& in, EventHandler& event);
-  std::vector<double> DoLPrecon(std::vector<double>& in, EventHandler& event);
-  std::vector<double> DoRPrecon(std::vector<double>& in, EventHandler& event);
+  void DoInvLPrecon(std::vector<double>& in, EventHandler& event);
+  void DoInvRPrecon(std::vector<double>& in, EventHandler& event);
+  void DoLPrecon(std::vector<double>& in, EventHandler& event);
+  void DoRPrecon(std::vector<double>& in, EventHandler& event);
 
   // Produce the light model, used on all gangs.
   EXOWaveformFT GetModelForTime(double time) const;
 };
 
-template<char WHICH, bool Add = true>
+template<char WHICH, bool Add>
 void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
                                                  std::vector<double>& out,
                                                  EventHandler& event)
