@@ -197,7 +197,7 @@ class EXORefitSignals
   EXOWaveformFT GetModelForTime(double time) const;
 };
 
-template<char WHICH>
+template<char WHICH, bool Add = true>
 void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
                                                  std::vector<double>& out,
                                                  EventHandler& event)
@@ -211,6 +211,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   // We also package the "preconditioning" matrix, so this actually does:
   // (0                D^(-1/2)L)
   // (trans(L)D^(-1/2) 0        )
+  // If Add is true (default), we add this to out; otherwise, we subtract it.
   assert(WHICH == 'L' or WHICH == 'C' or WHICH == 'A');
   assert(WHICH == 'L' or WHICH == 'C' or &in[0] != &out[0]);
   bool Lagrange = (WHICH == 'L' or WHICH == 'A');
@@ -234,11 +235,11 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
         size_t Index2 = 2*fChannels.size()*f + channel_index;
         const size_t DiagIndex = Index2;
         for(size_t n = 0; n <= event.fWireModel.size(); n++) {
-          if(Lagrange) out[Index2] += modelWF[2*f]*fNoiseDiag[DiagIndex]*in[Index1];
-          if(Constraint) out[Index1] += modelWF[2*f]*fNoiseDiag[DiagIndex]*in[Index2];
+          if(Lagrange) out[Index2] += (Add ? 1 : -1)*modelWF[2*f]*fNoiseDiag[DiagIndex]*in[Index1];
+          if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f]*fNoiseDiag[DiagIndex]*in[Index2];
           if(f < fMaxF-fMinF) {
-            if(Lagrange) out[Index2+fChannels.size()] += modelWF[2*f+1]*fNoiseDiag[DiagIndex+fChannels.size()]*in[Index1];
-            if(Constraint) out[Index1] += modelWF[2*f+1]*fNoiseDiag[DiagIndex+fChannels.size()]*in[Index2+fChannels.size()];
+            if(Lagrange) out[Index2+fChannels.size()] += (Add ? 1 : -1)*modelWF[2*f+1]*fNoiseDiag[DiagIndex+fChannels.size()]*in[Index1];
+            if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f+1]*fNoiseDiag[DiagIndex+fChannels.size()]*in[Index2+fChannels.size()];
           }
           Index1 += event.fColumnLength;
           Index2 += event.fColumnLength;
@@ -263,14 +264,14 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     if(Constraint) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                   1, event.fWireModel.size()+1, ExpectedYields.size(),
-                  event.fmodel_realimag[2*f], &Workspace[0], 1,
+                  (Add ? 1 : -1)*event.fmodel_realimag[2*f], &Workspace[0], 1,
                   &in[StartIndex], event.fColumnLength,
                   1, &out[event.fColumnLength-1], event.fColumnLength);
     }
     if(Lagrange) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                   ExpectedYields.size(), event.fWireModel.size()+1, 1,
-                  event.fmodel_realimag[2*f], &Workspace[0], ExpectedYields.size(),
+                  (Add ? 1 : -1)*event.fmodel_realimag[2*f], &Workspace[0], ExpectedYields.size(),
                   &in[event.fColumnLength-1], event.fColumnLength,
                   1, &out[StartIndex], event.fColumnLength);
     }
@@ -282,14 +283,14 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     if(Constraint) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                   1, event.fWireModel.size()+1, ExpectedYields.size(),
-                  event.fmodel_realimag[2*f+1], &Workspace[0], 1,
+                  (Add ? 1 : -1)*event.fmodel_realimag[2*f+1], &Workspace[0], 1,
                   &in[StartIndex], event.fColumnLength,
                   1, &out[event.fColumnLength-1], event.fColumnLength);
     }
     if(Lagrange) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                   ExpectedYields.size(), event.fWireModel.size()+1, 1,
-                  event.fmodel_realimag[2*f+1], &Workspace[0], ExpectedYields.size(),
+                  (Add ? 1 : -1)*event.fmodel_realimag[2*f+1], &Workspace[0], ExpectedYields.size(),
                   &in[event.fColumnLength-1], event.fColumnLength,
                   1, &out[StartIndex], event.fColumnLength);
     }
