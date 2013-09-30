@@ -789,7 +789,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   InitHandlingOfXWatch.Stop(InitHandlingOfXTag);
 
   // Now, while there are enough requests in the queue, satisfy those requests.
-  while(fNumVectorsInQueue > 40) DoPassThroughEvents();
+  while(fNumVectorsInQueue > 100) DoPassThroughEvents();
 }
 
 void EXORefitSignals::FlushEvents()
