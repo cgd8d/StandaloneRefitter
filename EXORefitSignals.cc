@@ -1007,8 +1007,14 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Compute omega.
     static SafeStopwatch OmegaWatch("Omega");
     SafeStopwatch::tag OmegaTag = OmegaWatch.Start();
-    double omega = std::inner_product(T.begin(), T.end(), event.fR.begin(), double(0)) /
-                   std::inner_product(T.begin(), T.end(), T.begin(), double(0));
+    double rdott = 0;
+    double tdott = 0;
+    for(size_t i = 0; i < T.size(); i++) {
+      // Compute T.R and T.T together -- reduces the number of calls to memory.
+      rdott += T[i]*event.fR[i];
+      tdott += T[i]*T[i];
+    }
+    double omega = rdott/tdott;
     OmegaWatch.Stop(OmegaTag);
     // Modify X and R.
     static SafeStopwatch UpdateXRWatch("UpdateXR");
@@ -1017,8 +1023,11 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
                 1, &event.fP[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
                 1, &event.fX[0], event.fColumnLength);
-    for(size_t i = 0; i < event.fX.size(); i++) event.fX[i] += omega*event.fR[i];
-    for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] -= omega*T[i];
+    for(size_t i = 0; i < event.fX.size(); i++) {
+      // Do both together -- reduces the number of calls to memory.
+      event.fX[i] += omega*event.fR[i];
+      event.fR[i] -= omega*T[i];
+    }
     UpdateXRWatch.Stop(UpdateXRTag);
     // Check if we should conclude here.
     if(CanTerminate(event)) return true;
