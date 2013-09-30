@@ -41,6 +41,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <fstream>
+#include <set>
 
 #ifdef USE_THREADS
 // We currently use the boost::threads library, if threading is enabled.
@@ -647,6 +648,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fWireModel.clear();
   if(not fAPDsOnly) {
     std::set<size_t> UWireSignals;
+    std::map<Int_t, std::set<Double_t> > EnsureNoDegeneracy;
     EXOElectronicsShapers* electronicsShapers = GetCalibrationFor(EXOElectronicsShapers,
                                                                   EXOElectronicsShapersHandler,
                                                                   "timevartau",
@@ -661,7 +663,24 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
       EXOUWireSignal* sig = ED->GetUWireSignal(i);
       if(sig->fIsInduction) continue;
+      if(EnsureNoDegeneracy.find(sig->fChannel) != EnsureNoDegeneracy.end()) {
+        // Ensure there aren't any already-existing u-wire signals too similar to this one.
+        // If we don't do this, we run the risk of creating a degeneracy and
+        // producing a singular or near-singular matrix.
+        // Reconstruction should never let this happen, but as of Sept 30, 2013
+        // there is at least one bug which permitted at least one event to trigger this.
+        // (Run 4544, event 1455)
+        // So, protect ourselves, but issue a warning if this is detected.
+        std::set<Double_t>& AlreadyFound = EnsureNoDegeneracy[sig->fChannel];
+        std::set<Double_t>::const_iterator upper = AlreadyFound.upper_bound(sig->fTime);
+        if((upper != AlreadyFound.end() and *upper - sig->fTime < 100*CLHEP::ns) or
+           (upper != AlreadyFound.begin() and sig->fTime - *(--upper) < 100*CLHEP::ns)) {
+          LogEXOMsg("Two u-wire signals were too close -- indicates a reconstruction bug", EEWarning);
+          continue;
+        }
+      }
       UWireSignals.insert(i);
+      EnsureNoDegeneracy[sig->fChannel].insert(sig->fTime);
     }
     for(std::set<size_t>::iterator sigIt = UWireSignals.begin();
         sigIt != UWireSignals.end();
