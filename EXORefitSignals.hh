@@ -2,7 +2,7 @@
 #define EXORefitSignals_hh
 
 #include "EXOUtilities/EXOTemplWaveform.hh"
-#include "TStopwatch.h"
+#include "SafeStopwatch.hh"
 #include "mkl_cblas.h"
 #include "mkl_lapacke.h"
 #include "mkl_vml_functions.h"
@@ -132,8 +132,7 @@ class EXORefitSignals
   double fRThreshold;
   bool CanTerminate(EventHandler& event);
 
-  // Various stopwatches, to understand the fraction of time spent actually solving the matrix.
-  std::map<std::string, TStopwatch> fWatches;
+  // Various counters.
   size_t fNumEventsHandled;
   size_t fNumSignalsHandled;
   size_t fTotalIterationsDone;

@@ -15,17 +15,16 @@ else
 	export CRAY_ROOTFS=DSL
 	cd $PBS_O_WORKDIR
 	export APRUN="aprun -n 1"
+	export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_atomic -lboost_timer -lboost_chrono -lboost_system"
 	if [ "$NERSC_HOST" = "hopper" ]; then
 		export LOCATION=HOPPER
-		export CXX=/opt/gcc/4.7.2/snos/bin/g++
+		export CXX='/opt/gcc/4.7.2/snos/bin/g++ -std=c++11'
 		# define USE_LOCKFREE when it is made available -- ticked filed.
 		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6"
-		export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
 	elif [ "$NERSC_HOST" = "edison" ]; then
 		export LOCATION=EDISON
-		export CXX=/opt/gcc/4.8.1/snos/bin/g++
+		export CXX='/opt/gcc/4.8.1/snos/bin/g++ -std=c++11'
 		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=12 -DUSE_LOCKFREE"
-		export BOOST_FLAGS="-I$BOOST_DIR/include -L$BOOST_LIB -lboost_thread -lboost_system"
 	else
 		echo "No match to nersc host."
 		exit 1
@@ -39,7 +38,7 @@ $APRUN $CXX -O3 -pthread \
 -L`exo-config --libdir` -lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities \
 -I$MKL_INC -L$MKL_LIBDIR \
 -o Refitter \
-Refitter.cc EXORefitSignals.cc \
+Refitter.cc EXORefitSignals.cc SafeStopwatch.cc \
 -Wl,-Bstatic \
 $BOOST_FLAGS \
 -Wl,--start-group -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -Wl,--end-group \

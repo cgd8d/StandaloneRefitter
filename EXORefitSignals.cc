@@ -85,7 +85,6 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
 {
   fWFEvent = NULL;
   fWFTree.SetBranchAddress("EventBranch", &fWFEvent);
-  fWatches["Time from construction to destruction"].Start();
 }
 
 void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
@@ -97,7 +96,8 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // against that is small.
   // For the future, might consider whether we can rearrange EXONoiseCorrelations to be
   // more convenient for this.
-  fWatches["FillNoiseCorrelations"].Start(false);
+  static SafeStopwatch FillNoiseCorrWatch("FillNoiseCorrelations");
+  SafeStopwatch::tag FillNoiseCorrTag = FillNoiseCorrWatch.Start();
 
   // Get the channel map.
   const EXOChannelMap& ChannelMap = GetChanMapForHeader(ED.fEventHeader);
@@ -113,7 +113,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
 
   // If the channel mapping is unchanged, do nothing.
   if(ChannelsToUse == fChannels) {
-    fWatches["FillNoiseCorrelations"].Stop();
+    FillNoiseCorrWatch.Stop(FillNoiseCorrTag);
     return;
   }
 
@@ -269,8 +269,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
       }
     }
   }
-
-  fWatches["FillNoiseCorrelations"].Stop();
+  FillNoiseCorrWatch.Stop(FillNoiseCorrTag);
 }
 
 int EXORefitSignals::Initialize()
@@ -347,23 +346,10 @@ int EXORefitSignals::Initialize()
 
 EXORefitSignals::~EXORefitSignals()
 {
-  // Print statistics and timing information.
-
-  // Stop any watches which are still going.
-  for(std::map<std::string, TStopwatch>::iterator it = fWatches.begin(); it != fWatches.end(); it++) {
-    it->second.Stop();
-  }
-
+  // Print statistics.
   std::cout<<fNumEventsHandled<<" events were handled by signal refitting."<<std::endl;
   std::cout<<"Those events contained a total of "<<fNumSignalsHandled<<" signals to refit."<<std::endl;
   std::cout<<fTotalIterationsDone<<" iterations were required."<<std::endl;
-  std::cout<<"Timings follow."<<std::endl;
-
-  // Print all watch information.
-  for(std::map<std::string, TStopwatch>::iterator it = fWatches.begin(); it != fWatches.end(); it++) {
-    std::cout<<it->first<<":"<<std::endl;
-    it->second.Print();
-  }
 }
 
 EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
@@ -644,7 +630,8 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     return;
   }
 
-  fWatches["GenerateExpectedSignals"].Start(false);
+  static SafeStopwatch GenerateExpectedSignalsWatch("GenerateExpectedSignals");
+  SafeStopwatch::tag GenerateExpectedSignalsTag = GenerateExpectedSignalsWatch.Start();
   // Generate the expected light signal shape (normalized), given the time of the scintillation.
   // Alternate between real and imaginary parts, mimicking the variable ordering we use throughout.
   // Also drop the zero-frequency component (which isn't used)
@@ -716,7 +703,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
       event->fWireModel.push_back(std::make_pair(*sigIt, ModelForThisSignal));
     } // End loop over u-wire signals.
   } // (which we only did if we're handling wire signals.
-  fWatches["GenerateExpectedSignals"].Stop();
+  GenerateExpectedSignalsWatch.Stop(GenerateExpectedSignalsTag);
 
   // For convenience, store the column length we'll be dealing with.
   event->fColumnLength = 2*fChannels.size()*(fMaxF-fMinF) + fChannels.size() + event->fWireModel.size() + 1;
@@ -727,7 +714,8 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // Poisson noise terms.
   // Haven't decided yet whether it's important to include Poisson terms on the diagonal; currently I don't.
   // Find X using trans(X)X = trans(L) D^(-1) L.
-  fWatches["Find H"].Start(false);
+  static SafeStopwatch FindHWatch("Find H");
+  SafeStopwatch::tag FindHTag = FindHWatch.Start();
   std::vector<double> Temp1(event->fColumnLength * (event->fWireModel.size()+1), 0);
   std::vector<double> Temp2(event->fColumnLength * (event->fWireModel.size()+1), 0);
   for(size_t i = 0; i < event->fWireModel.size()+1; i++) {
@@ -750,12 +738,13 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
         Temp1[i*event->fColumnLength + fNoiseColumnLength + j];
     }
   }
-  fWatches["Find H"].Stop();
+  FindHWatch.Stop(FindHTag);
 
   // Give a really nice initial guess for X, obtained by solving exactly
   // with the approximate version of the matrix used for preconditioning.
   // Since the RHS only has non-zero entries in the lower square, simplifications are used.
-  fWatches["Initial guess for X"].Start(false);
+  static SafeStopwatch GuessXWatch("Initial guess for X");
+  SafeStopwatch::tag GuessXTag = GuessXWatch.Start();
   event->fX.assign(event->fColumnLength * (event->fWireModel.size()+1), 0);
   for(size_t i = 0; i <= event->fWireModel.size(); i++) {
     size_t Index = (i+1)*event->fColumnLength; // Next column; then subtract.
@@ -764,8 +753,9 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     event->fX[Index] = 1; // All models are normalized to 1.
   }
   DoInvLPrecon(event->fX, *event);
-  fWatches["Initial guess for X"].Stop();
-  fWatches["Initial multiplication request on X"].Start(false);
+  GuessXWatch.Stop(GuessXTag);
+  static SafeStopwatch InitHandlingOfXWatch("Initial computations to prepare for handling");
+  SafeStopwatch::tag InitHandlingOfXTag = InitHandlingOfXWatch.Start();
   event->fprecon_tmp = event->fX;
   DoInvRPrecon(event->fprecon_tmp, *event); // Beginning of multiplying by matrix.
 
@@ -796,7 +786,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     assert(fEventHandlerQueue.unsynchronized_push(evt));
   }
 #endif
-  fWatches["Initial multiplication request on X"].Stop();
+  InitHandlingOfXWatch.Stop(InitHandlingOfXTag);
 
   // Now, while there are enough requests in the queue, satisfy those requests.
   while(fNumVectorsInQueue > 40) DoPassThroughEvents();
@@ -818,7 +808,8 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   FinishEventMutex.lock(); // Wait until we get a lock.
 #endif
   if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
-  fWatches["FinishEvent (occurs concurrently with HandleEvents threads)"].Start(false);
+  static SafeStopwatch FinishEventWatch("Finishing event");
+  SafeStopwatch::tag FinishEventTag = FinishEventWatch.Start();
 
   EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
 
@@ -901,7 +892,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 
   fOutputModule.ProcessEvent(ED);
   if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
-  fWatches["FinishEvent (occurs concurrently with HandleEvents threads)"].Stop();
+  FinishEventWatch.Stop(FinishEventTag);
 #ifdef USE_THREADS
   FinishEventMutex.unlock(); // Release access to tinput and toutput for other threads.
 #endif
@@ -1100,7 +1091,8 @@ void EXORefitSignals::DoNoiseMultiplication()
   fNoiseMulResult.assign(fNoiseMulQueue.size(), 0); // Probably don't need to fill with 0.
 
   // Do the multiplication -- one call for every frequency.
-  fWatches["DoNoiseMultiplication"].Start(false); // Don't count vector allocation.
+  static SafeStopwatch NoiseMulWatch("DoNoiseMultiplication");
+  SafeStopwatch::tag NoiseMulTag = NoiseMulWatch.Start(); // Don't count vector allocation.
   if(fVerbose) std::cout<<"Starting DoNoiseMultiplication."<<std::endl;
 #ifdef USE_THREADS
   boost::thread_group threads;
@@ -1134,7 +1126,7 @@ void EXORefitSignals::DoNoiseMultiplication()
   // The sequential version.
   DoNoiseMultiplication_Range(0, (fMaxF-fMinF+1)); // to handle [0, fMaxF-fMinF], inclusive.
 #endif
-  fWatches["DoNoiseMultiplication"].Stop();
+  NoiseMulWatch.Stop(NoiseMulTag);
   if(fVerbose) std::cout<<"Done with DoNoiseMultiplication."<<std::endl;
 
   // Clean up, to be ready for the next call.
@@ -1319,7 +1311,8 @@ void EXORefitSignals::DoPassThroughEvents()
   // do a round of noise multiplication followed by a round of BiCGSTAB.
   DoNoiseMultiplication();
   assert(fEventHandlerResults.empty());
-  fWatches["HandleEvents"].Start(false);
+  static SafeStopwatch HandleEventsWatch("HandleEvents");
+  SafeStopwatch::tag HandleEventsTag = HandleEventsWatch.Start();
   if(fVerbose) std::cout<<"Starting HandleEvents."<<std::endl;
 #ifdef USE_THREADS
   boost::thread_group threads;
@@ -1333,7 +1326,7 @@ void EXORefitSignals::DoPassThroughEvents()
 #ifdef USE_THREADS
   threads.join_all();
 #endif
-  fWatches["HandleEvents"].Stop();
+  HandleEventsWatch.Stop(HandleEventsTag);
   if(fVerbose) std::cout<<"Done with HandleEvents."<<std::endl;
   assert(fEventHandlerQueue.empty());
 
