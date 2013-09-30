@@ -33,6 +33,7 @@ int main(int argc, char** argv)
   std::string OutFileName;
   Long64_t StartEntry = 0;
   Long64_t NumEntries = 100;
+  double Threshold = 10;
 
   if(argc == 2) {
     std::cout<<"Reading arguments from file \""<<argv[1]<<"\"."<<std::endl;
@@ -41,7 +42,8 @@ int main(int argc, char** argv)
                >> RawFileName
                >> OutFileName
                >> StartEntry
-               >> NumEntries;
+               >> NumEntries
+               >> Threshold;
   }
   else {
     assert(argc >= 4);
@@ -50,6 +52,7 @@ int main(int argc, char** argv)
     OutFileName = argv[3];
     if(argc >= 5) StartEntry = std::atol(argv[4]);
     if(argc >= 6) NumEntries = std::atol(argv[5]);
+    if(argc >= 7) Threshold = std::atof(argv[6]);
   }
 
   std::cout<<"Input processed file: "<<ProcessedFileName<<std::endl;
@@ -79,7 +82,7 @@ int main(int argc, char** argv)
 #elif defined SLAC
   RefitSig.SetNoiseFilename("/nfs/slac/g/exo_data4/users/cgd8d/rhel5-64/noise_manyruns_withuwires_100000.dat");
 #endif
-  RefitSig.SetRThreshold(0.1);
+  RefitSig.SetRThreshold(Threshold);
   RefitSig.fVerbose = true;
   RefitSig.Initialize();
 
