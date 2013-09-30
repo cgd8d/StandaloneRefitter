@@ -30,11 +30,11 @@ void SafeStopwatch::Print() const
   // but technically this function is thread-safe.
   std::cout<<fID<<" has accumulated ";
 #ifdef USE_THREADS
-  std::cout<<fNanoseconds.load(boost::memory_order_relaxed);
+  std::cout<<double(fNanoseconds.load(boost::memory_order_relaxed))/1e9;
 #else
-  std::cout<<fNanoseconds;
+  std::cout<<double(fNanoseconds)/1e9;
 #endif
-  std::cout<<" ns."<<std::endl;
+  std::cout<<" sec."<<std::endl;
 }
 
 SafeStopwatch::tag SafeStopwatch::Start() const
