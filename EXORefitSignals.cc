@@ -1182,6 +1182,8 @@ void EXORefitSignals::DoNoiseMultiplication_Range(size_t flo, size_t fhi)
   // In case we are parallelizing the noise multiplication, this lets us
   // break up DoNoiseMultiplication into pieces easily.
   // (If we are not parallelizing, the penalty is probably zero.)
+  static SafeStopwatch NoiseMulRangeWatch("DoNoiseMultiplication_Range");
+  SafeStopwatch::tag NoiseMulRangeTag = NoiseMulRangeWatch.Start(); // Don't count vector allocation.
   assert(fNoiseMulQueue.size() == fNoiseColumnLength*fNumVectorsInQueue);
   assert(fNoiseMulResult.size() == fNoiseColumnLength*fNumVectorsInQueue);
   assert(fNoiseCorrelations.size() >= fhi);
@@ -1194,6 +1196,7 @@ void EXORefitSignals::DoNoiseMultiplication_Range(size_t flo, size_t fhi)
                 1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], fNoiseColumnLength,
                 0, &fNoiseMulResult[StartIndex], fNoiseColumnLength);
   }
+  NoiseMulRangeWatch.Stop(NoiseMulRangeTag);
 }
 
 void EXORefitSignals::DoInvLPrecon(std::vector<double>& in, EventHandler& event)
