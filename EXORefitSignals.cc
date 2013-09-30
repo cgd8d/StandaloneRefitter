@@ -151,9 +151,9 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   fNoiseDiag.clear();
   fNoiseDiag.reserve(fNoiseColumnLength);
   assert(NoiseFile.open(fNoiseFilename.c_str(), std::ios_base::in | std::ios_base::binary) != NULL);
-  assert(NoiseFile.pubseekoff(0, std::ios_base::beg, std::ios_base::in) == 0);
+  assert(NoiseFile.pubseekoff(0, std::ios_base::beg, std::ios_base::in) == std::streampos(0));
   assert(NoiseFile.pubseekoff(0, std::ios_base::end, std::ios_base::in) ==
-         FileNumChannels*FileNumChannels*(4*1023+1)*sizeof(double));
+         std::streampos(FileNumChannels*FileNumChannels*(4*1023+1)*sizeof(double)));
   assert(sizeof(double) == 8);
   assert(fMinF == 1); // Else I'll need to generalize the code that produces these files.
   for(size_t f = fMinF; f <= fMaxF; f++) {
@@ -162,7 +162,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     block.clear();
     block.reserve(fChannels.size()*fChannels.size()*(IsFullBlock ? 4 : 1));
 
-    size_t FreqFilePos = (f-fMinF)*4*sizeof(double)*FileNumChannels*FileNumChannels;
+    std::streampos FreqFilePos = (f-fMinF)*4*sizeof(double)*FileNumChannels*FileNumChannels;
 
     // Go ahead and fetch the entire block from the file.
     // A few rows/columns aren't needed (suppressed or bad channels),
