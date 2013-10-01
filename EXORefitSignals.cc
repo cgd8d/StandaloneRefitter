@@ -668,13 +668,13 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
         // If we don't do this, we run the risk of creating a degeneracy and
         // producing a singular or near-singular matrix.
         // Reconstruction should never let this happen, but as of Sept 30, 2013
-        // there is at least one bug which permitted at least one event to trigger this.
-        // (Run 4544, event 1455)
+        // there is at least one bug which is permitting such events to occur.
         // So, protect ourselves, but issue a warning if this is detected.
+        // (500ns was chosen by looking at events which had difficulty converging.)
         std::set<Double_t>& AlreadyFound = EnsureNoDegeneracy[sig->fChannel];
         std::set<Double_t>::const_iterator upper = AlreadyFound.upper_bound(sig->fTime);
-        if((upper != AlreadyFound.end() and *upper - sig->fTime < 100*CLHEP::ns) or
-           (upper != AlreadyFound.begin() and sig->fTime - *(--upper) < 100*CLHEP::ns)) {
+        if((upper != AlreadyFound.end() and *upper - sig->fTime < 500*CLHEP::ns) or
+           (upper != AlreadyFound.begin() and sig->fTime - *(--upper) < 500*CLHEP::ns)) {
           LogEXOMsg("Two u-wire signals were too close -- indicates a reconstruction bug", EEWarning);
           continue;
         }
