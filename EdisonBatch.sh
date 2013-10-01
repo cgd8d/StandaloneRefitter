@@ -7,6 +7,6 @@
 
 export CRAY_ROOTFS=DSL
 cd $SCRATCH
-cp $HOME/edison/StandaloneRefitter/Refitter .
-aprun -n 2 -S 1 -d 12 -ss -cc numa_node $PBS_O_WORKDIR/MPIWrapper.py ./Refitter $SCRATCH/InOutFiles
+cp $HOME/edison/Refitter/Refitter .
+aprun -n 1 -S 1 -d 12 -ss -cc numa_node ./Refitter $SCRATCH/InOutFiles/infile0000.txt
 
