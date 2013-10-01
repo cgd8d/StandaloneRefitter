@@ -70,6 +70,7 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
 : fAPDsOnly(false),
   fUseWireAPDCorrelations(true),
   fVerbose(false),
+  fDoRestarts(0),
   fInputModule(inputModule),
   fWFTree(wfTree),
   fOutputModule(outputModule),
@@ -539,6 +540,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
   EventHandler* event = new EventHandler;
   event->fEntryNumber = entryNum;
+  event->fNumIterations = 0;
 
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
@@ -1050,6 +1052,13 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     UpdateXRWatch.Stop(UpdateXRTag);
     // Check if we should conclude here.
     if(CanTerminate(event)) return true;
+    // If we're doing a restarted solver and it's time, restart.
+    if(fDoRestarts > 0) {
+      if(event.fNumIterations >= fDoRestarts) {
+        DoRestart(event);
+        return false;
+      }
+    }
     // Now compute beta, solving R0hat_V beta = -R0hat_T
     static SafeStopwatch FindBetaWatch("FindBeta");
     SafeStopwatch::tag FindBetaTag = FindBetaWatch.Start();
@@ -1438,6 +1447,7 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
   // Permit early return if we're not in verbose mode; if we are, finish to collect all possible information.
   static SafeStopwatch CanTerminateWatch("CanTerminate");
   SafeStopwatch::tag CanTerminateTag = CanTerminateWatch.Start();
+  event.fNumIterations++; // Iterations = number of times we've tried to terminate.
   std::vector<double> R_unprec = event.fR;
   DoLPrecon(R_unprec, event);
   double WorstNorm = 0;
@@ -1471,4 +1481,18 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
   }
   CanTerminateWatch.Stop(CanTerminateTag);
   return true;
+}
+
+void EXORefitSignals::DoRestart(EventHandler& event)
+{
+  // "Restart" the event -- retain X, but clear out everything else so that
+  // it will be treated like an initial guess.
+  LogEXOMsg("Restarting an event", EEWarning); // May downgrade this notice, or eliminate it altogether.
+  event.fR.clear();
+  fNumIterations = 0;
+
+  // Start matrix multiplication of X, to find a new R.
+  event.fprecon_tmp = event.fX;
+  DoInvRPrecon(event.fprecon_tmp, event);
+  event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
 }

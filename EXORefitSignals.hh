@@ -27,6 +27,7 @@ struct EventHandler {
   Long64_t fEntryNumber;
   double fUnixTimeOfEvent;
   size_t fColumnLength;
+  size_t fNumIterations; // Count the number of times we've tried to terminate.
 
   // fWireModel keeps, for each u-wire signal we're fitting:
   //   the index of the u-wire signal within the event.
@@ -95,6 +96,7 @@ class EXORefitSignals
   bool fAPDsOnly; // Do not denoise wire signals; and do not use u-wires to denoise APDs.
   bool fUseWireAPDCorrelations; // For now, this isn't higher performance -- just for testing.
   bool fVerbose;
+  size_t fDoRestarts; // 0 if we never restart; else, value indicates number of iterations before a restart.
 
   int Initialize();
   void AcceptEvent(EXOEventData* ED, Long64_t entryNum);
@@ -160,6 +162,7 @@ class EXORefitSignals
 
   // Block BiCGSTAB algorithm.
   bool DoBlBiCGSTAB(EventHandler& event);
+  void DoRestart(EventHandler& event);
 
   // Functions to multiply by the noise matrix.
   size_t fNoiseColumnLength;
