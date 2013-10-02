@@ -27,6 +27,7 @@ struct EventHandler {
   Long64_t fEntryNumber;
   double fUnixTimeOfEvent;
   size_t fColumnLength;
+  size_t fNumIterSinceReset;
   size_t fNumIterations; // Count the number of times we've tried to terminate.
 
   // fWireModel keeps, for each u-wire signal we're fitting:

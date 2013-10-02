@@ -541,6 +541,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   EventHandler* event = new EventHandler;
   event->fEntryNumber = entryNum;
   event->fNumIterations = 0;
+  event->fNumIterSinceReset = 0;
 
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
@@ -1052,9 +1053,15 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     UpdateXRWatch.Stop(UpdateXRTag);
     // Check if we should conclude here.
     if(CanTerminate(event)) return true;
+    // We permit a maximum of 2000 iterations before we give up.
+    if(event.fNumIterations >= 2000) {
+      event.fX.clear();
+      std::cout<<"Giving up on entry "<<event.fEntryNumber<<std::endl;
+      return true;
+    }
     // If we're doing a restarted solver and it's time, restart.
     if(fDoRestarts > 0) {
-      if(event.fNumIterations >= fDoRestarts) {
+      if(event.fNumIterSinceReset >= fDoRestarts) {
         DoRestart(event);
         return false;
       }
@@ -1448,6 +1455,7 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
   static SafeStopwatch CanTerminateWatch("CanTerminate");
   SafeStopwatch::tag CanTerminateTag = CanTerminateWatch.Start();
   event.fNumIterations++; // Iterations = number of times we've tried to terminate.
+  event.fNumIterSinceReset++;
   std::vector<double> R_unprec = event.fR;
   DoLPrecon(R_unprec, event);
   double WorstNorm = 0;
@@ -1490,7 +1498,7 @@ void EXORefitSignals::DoRestart(EventHandler& event)
   LogEXOMsg("Restarting an event", EEWarning); // May downgrade this notice, or eliminate it altogether.
   event.fR.clear();
   event.fV.clear();
-  event.fNumIterations = 0;
+  event.fNumIterSinceReset = 0;
 
   // Start matrix multiplication of X, to find a new R.
   event.fprecon_tmp = event.fX;
