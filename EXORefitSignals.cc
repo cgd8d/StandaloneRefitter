@@ -70,7 +70,7 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
 : fAPDsOnly(false),
   fUseWireAPDCorrelations(true),
   fVerbose(false),
-  fDoRestarts(500),
+  fDoRestarts(100),
   fInputModule(inputModule),
   fWFTree(wfTree),
   fOutputModule(outputModule),
@@ -1489,7 +1489,8 @@ void EXORefitSignals::DoRestart(EventHandler& event)
   // it will be treated like an initial guess.
   LogEXOMsg("Restarting an event", EEWarning); // May downgrade this notice, or eliminate it altogether.
   event.fR.clear();
-  fNumIterations = 0;
+  event.fV.clear();
+  event.fNumIterations = 0;
 
   // Start matrix multiplication of X, to find a new R.
   event.fprecon_tmp = event.fX;
