@@ -173,8 +173,8 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
     assert(NoiseFile.pubseekpos(FreqFilePos, std::ios_base::in) == FreqFilePos);
     if(NoiseFile.sgetn((char*)&FileBlock[0], FileBlock.size()*sizeof(double)) !=
        FileBlock.size()*sizeof(double)) {
-      std::cout<<"Failed to read out block corresponding to f = "<<f<<std::endl;
-      LogEXOMsg("sgetn failed", EEAlert);
+      std::cout<<"sgetn failed to read out block corresponding to f = "<<f<<std::endl;
+      std::exit(1);
     }
 
     // Iterate through columns (real).
@@ -286,7 +286,10 @@ int EXORefitSignals::Initialize()
   fTotalIterationsDone = 0;
 
   std::string FullLightmapFilename = EXOMiscUtil::SearchForFile(fLightmapFilename);
-  if(FullLightmapFilename == "") LogEXOMsg("Failed to find lightmap file.", EEAlert);
+  if(FullLightmapFilename == "") {
+    std::cout<<"Failed to find lightmap file: "<<fLightmapFilename<<std::endl;
+    std::exit(1);
+  }
   TFile* LightmapFile = TFile::Open(FullLightmapFilename.c_str());
 
   // Get the list of active APDs.
@@ -661,7 +664,8 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
                                                                "source_calibration",
                                                                ED->fEventHeader);
     if(not electronicsShapers or not GainsFromDatabase) {
-      LogEXOMsg("Unable to get necessary information from DB", EEAlert);
+      std::cout<<"Unable to get electronics or gains from the database."<<std::endl;
+      std::exit(1);
     }
     for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
       EXOUWireSignal* sig = ED->GetUWireSignal(i);
@@ -678,7 +682,8 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
         std::set<Double_t>::const_iterator upper = AlreadyFound.upper_bound(sig->fTime);
         if((upper != AlreadyFound.end() and *upper - sig->fTime < 500*CLHEP::ns) or
            (upper != AlreadyFound.begin() and sig->fTime - *(--upper) < 500*CLHEP::ns)) {
-          LogEXOMsg("Two u-wire signals were too close -- indicates a reconstruction bug", EEWarning);
+          std::cout<<"For entry "<<event->fEntryNumber<<
+                     ", two u-wire signals were too close -- indicates a reconstruction bug."<<std::endl;
           continue;
         }
       }
@@ -752,7 +757,11 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   lapack_int ret;
   ret = LAPACKE_dpotrf(LAPACK_COL_MAJOR, 'U', event->fWireModel.size()+1,
                        &Temp1[fNoiseColumnLength], event->fColumnLength);
-  if(ret != 0) LogEXOMsg("Failed factorization", EEAlert);
+  if(ret != 0) {
+    std::cout<<"Factorization to find H failed on entry "<<event->fEntryNumber<<
+               " with ret = "<<ret<<std::endl;
+    std::exit(1);
+  }
   event->fPreconX.assign((event->fWireModel.size()+1)*(event->fWireModel.size()+1), 0);
   for(size_t i = 0; i < event->fWireModel.size()+1; i++) {
     for(size_t j = 0; j <= i; j++) {
@@ -981,7 +990,11 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     ret = LAPACKE_dgetrf(LAPACK_COL_MAJOR, event.fWireModel.size()+1, event.fWireModel.size()+1,
                          &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
                          &event.fR0hat_V_pivot[0]);
-    if(ret != 0) LogEXOMsg("Factorization failed", EEAlert);
+    if(ret != 0) {
+      std::cout<<"Factorization of fR0hat.V failed on entry "<<event.fEntryNumber<<
+                 " with ret = "<<ret<<std::endl;
+      std::exit(1);
+    }
     FactorizeRVWatch.Stop(FactorizeRVTag);
     // Now compute alpha.
     static SafeStopwatch ComputeAlphaWatch("ComputeAlpha");
@@ -996,7 +1009,11 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                          &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
                          &event.fR0hat_V_pivot[0],
                          &event.fAlpha[0], event.fWireModel.size()+1);
-    if(ret != 0) LogEXOMsg("Solving failed", EEAlert);
+    if(ret != 0) {
+      std::cout<<"Solving for alpha failed on entry "<<event.fEntryNumber<<
+                 " with ret = "<<ret<<std::endl;
+      std::exit(1);
+    }
     ComputeAlphaWatch.Stop(ComputeAlphaTag);
     // Update R <-- R - V*alpha.
     static SafeStopwatch UpdateRWatch("UpdateR");
@@ -1079,7 +1096,11 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                          &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
                          &event.fR0hat_V_pivot[0],
                          &Beta[0], event.fWireModel.size()+1);
-    if(ret != 0) LogEXOMsg("Solving failed", EEAlert);
+    if(ret != 0) {
+      std::cout<<"Solving for beta failed on entry "<<event.fEntryNumber<<
+                 " with ret = "<<ret<<std::endl;
+      std::exit(1);
+    }
     FindBetaWatch.Stop(FindBetaTag);
     // Update P.  Overwrite T for temporary work.
     static SafeStopwatch UpdatePWatch("UpdateP");
@@ -1495,7 +1516,8 @@ void EXORefitSignals::DoRestart(EventHandler& event)
 {
   // "Restart" the event -- retain X, but clear out everything else so that
   // it will be treated like an initial guess.
-  LogEXOMsg("Restarting an event", EEWarning); // May downgrade this notice, or eliminate it altogether.
+  std::cout<<"Restarting entry "<<event.fEntryNumber<<
+             " with "<<event.fNumIterations<<" total iterations."<<std::endl;
   event.fR.clear();
   event.fV.clear();
   event.fNumIterSinceReset = 0;

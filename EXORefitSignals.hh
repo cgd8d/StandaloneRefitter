@@ -231,7 +231,11 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
       size_t channel_index = 0;
       while(fChannels[channel_index] != ChannelWithWireSignal) {
         channel_index++;
-        if(channel_index >= fChannels.size()) LogEXOMsg("Index exceeded -- why can this happen?", EEAlert);
+        if(channel_index >= fChannels.size()) {
+          std::cout<<"On entry "<<event.fEntryNumber<<", in DoLagrangeAndConstraintMul, "<<
+                     "Index exceeded -- why can this happen?"<<std::endl;
+          std::exit(1);
+        }
       }
       const std::vector<double>& modelWF = it->second;
       for(size_t f = 0; f <= fMaxF - fMinF; f++) {
