@@ -844,6 +844,8 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 
   // We need to clear out the denoised information here, since we just freshly read the event from file.
   for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
+    ED->GetScintillationCluster(i)->fEnergy = ED->GetScintillationCluster(i)->fRawEnergy;
+    ED->GetScintillationCluster(i)->fRawEnergy = 0;
     ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
   }
   for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
@@ -917,6 +919,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
       }
     }
     ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
+    ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
   } // End setting of denoised energy signals.
 
   fOutputModule.ProcessEvent(ED);
