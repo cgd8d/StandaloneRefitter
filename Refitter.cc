@@ -22,11 +22,43 @@ Should be called like:
 #include "TFile.h"
 #include "TTree.h"
 #include <iostream>
-#include <cstdlib>
+
+#ifdef USE_THREADS
 #include <fstream>
+#include <iomanip>
+#include <mpi.h>
+// To control order of destruction -- we'd like for all function-static objects to be destroyed
+// before MPI_Finalize is called, so their destructors have a chance to execute side-effects.
+// Also redirect output properly at this stage.
+struct mpi_handler
+{
+  int rank;
+  std::string RankString;
+  std::ofstream Output;
+  mpi_handler(int argc, char** argv) {
+    assert(argc == 2);
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    std::ostringstream ProcessRankString;
+    ProcessRankString << std::setw(4) << std::setfill('0') << rank << ".txt";
+    RankString = ProcessRankString.str();
+    Output.open(std::string(argv[1]) + "/outfile" + RankString);
+    std::cout.rdbuf(Output.rdbuf()); // Redirect all output from this process to file.
+    std::cerr.rdbuf(Output.rdbuf());
+  }
+  ~mpi_handler() {
+    MPI_Finalize();
+  }
+};
+#else
+#include <cstdlib>
+#endif
 
 int main(int argc, char** argv)
 {
+#ifdef USE_THREADS
+  static mpi_handler mpi; // This should be the very first thing created, and the very last destroyed.
+#endif
   std::cout<<"Entered program."<<std::endl;
   std::string ProcessedFileName;
   std::string RawFileName;
@@ -35,25 +67,23 @@ int main(int argc, char** argv)
   Long64_t NumEntries = 100;
   double Threshold = 10;
 
-  if(argc == 2) {
-    std::cout<<"Reading arguments from file \""<<argv[1]<<"\"."<<std::endl;
-    std::ifstream OptionFile(argv[1]);
-    OptionFile >> ProcessedFileName
-               >> RawFileName
-               >> OutFileName
-               >> StartEntry
-               >> NumEntries
-               >> Threshold;
-  }
-  else {
-    assert(argc >= 4);
-    ProcessedFileName = argv[1];
-    RawFileName = argv[2];
-    OutFileName = argv[3];
-    if(argc >= 5) StartEntry = std::atol(argv[4]);
-    if(argc >= 6) NumEntries = std::atol(argv[5]);
-    if(argc >= 7) Threshold = std::atof(argv[6]);
-  }
+#ifdef USE_THREADS
+  std::ifstream OptionFile(std::string(argv[1]) + "/infile" + mpi.RankString);
+  OptionFile >> ProcessedFileName
+             >> RawFileName
+             >> OutFileName
+             >> StartEntry
+             >> NumEntries
+             >> Threshold;
+#else
+  assert(argc >= 4);
+  ProcessedFileName = argv[1];
+  RawFileName = argv[2];
+  OutFileName = argv[3];
+  if(argc >= 5) StartEntry = std::atol(argv[4]);
+  if(argc >= 6) NumEntries = std::atol(argv[5]);
+  if(argc >= 7) Threshold = std::atof(argv[6]);
+#endif
 
   std::cout<<"Input processed file: "<<ProcessedFileName<<std::endl;
   std::cout<<"Input raw file: "<<RawFileName<<std::endl;
