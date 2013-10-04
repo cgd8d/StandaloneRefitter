@@ -19,12 +19,11 @@ Be sure to compile with optimization enabled!  It makes a big difference.
 #include "EXOUtilities/EXOWaveformFT.hh"
 #include "EXOUtilities/EXOWaveform.hh"
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
-#include "TFile.h"
-#include "TTree.h"
+#include "EXOUtilities/EXORunInfoManager.hh"
+#include "EXOUtilities/EXORunInfo.hh"
+#include "TChain.h"
 #include <cassert>
 #include <cstdlib>
-#include <sstream>
-#include <iomanip>
 #include <fstream>
 
 EXOCoincidences coinc;
@@ -126,41 +125,42 @@ int main(int argc, char** argv)
   for(size_t runIndex = 0; runIndex < Runs.size(); runIndex++) {
     std::cout<<"Starting on run "<<Runs[runIndex]<<std::endl;
 
-    std::ostringstream RawRunName;
-    RawRunName << "root://exo-rdr.slac.stanford.edu//exo_data/data/WIPP/root/";
-    RawRunName << Runs[runIndex] << "/run";
-    RawRunName << std::setw(8) << std::setfill('0') << Runs[runIndex];
-    RawRunName << "-000.root";
+    const EXORunInfo::RunList& rawRunList =
+      EXORunInfoManager::GetRunInfo(Runs[runIndex], "Data/Raw/root").GetRunFiles();
+    const EXORunInfo::RunList& procRunList =
+      EXORunInfoManager::GetRunInfo(Runs[runIndex], "Data/Processed/masked").GetRunFiles();
+    if(rawRunList.size() != procRunList.size()) {
+      std::cout<<"Run "<<Runs[runIndex]<<" has a mismatch between raw and processed file count."<<std::endl;
+      continue;
+    }
 
-    std::ostringstream ProcRunName;
-    ProcRunName << "/nfs/slac/g/exo_data3/exo_data/data/WIPP/masked/";
-    ProcRunName << Runs[runIndex] << "/masked";
-    ProcRunName << std::setw(8) << std::setfill('0') << Runs[runIndex];
-    ProcRunName << "-000.root";
+    TChain rawChain("tree");
+    TChain procChain("tree");
+    for(EXORunInfo::RunList::const_iterator it = rawRunList.begin(); it != rawRunList.end(); it++) {
+      rawChain.AddFile(it->GetFileLocation().c_str());
+    }
+    for(EXORunInfo::RunList::const_iterator it = procRunList.begin(); it != procRunList.end(); it++) {
+      procChain.AddFile(it->GetFileLocation().c_str());
+    }
 
-    TFile* ProcFile = TFile::Open(ProcRunName.str().c_str());
-    TTree* ProcTree = (TTree*)ProcFile->Get("tree");
-    EXOEventData* ProcEvent = NULL;
-    ProcTree->SetBranchAddress("EventBranch", &ProcEvent);
-
-    TFile* RawFile = TFile::Open(RawRunName.str().c_str());
-    TTree* RawTree = (TTree*)RawFile->Get("tree");
     EXOEventData* RawEvent = NULL;
-    RawTree->SetBranchAddress("EventBranch", &RawEvent);
-    assert(RawTree->BuildIndex("fRunNumber", "fEventNumber") >= 0);
+    EXOEventData* ProcEvent = NULL;
+    rawChain.SetBranchAddress("EventBranch", &RawEvent);
+    procChain.SetBranchAddress("EventBranch", &ProcEvent);
+    assert(rawChain.BuildIndex("fRunNumber", "fEventNumber") >= 0);
 
-    coinc.Load(ProcRunName.str()); // Clears any previously-loaded file.
+    coinc.Load(procChain); // Clears any previously-loaded chain.
 
     int NumAcceptedFromThisRun = 0;
     Long64_t EntryNum = 0;
-    while(NumAcceptedFromThisRun < EntriesPerRun and EntryNum < ProcTree->GetEntries()) {
-      ProcTree->GetEntry(EntryNum);
+    while(NumAcceptedFromThisRun < EntriesPerRun and EntryNum < procChain.GetEntries()) {
+      procChain.GetEntry(EntryNum);
       EntryNum++;
       if(not IsEventAcceptable(ProcEvent)) continue;
       std::cout<<"\tAccepted event "<<ProcEvent->fEventNumber<<std::endl;
 
       // Get the raw entry by index, since entry numbers won't generally match (due to masking).
-      assert(RawTree->GetEntryWithIndex(ProcEvent->fRunNumber, ProcEvent->fEventNumber));
+      assert(rawChain.GetEntryWithIndex(ProcEvent->fRunNumber, ProcEvent->fEventNumber));
 
       // Convert EXOIntWaveforms to EXODoubleWaveforms.
       // Also establish the channel ordering.
