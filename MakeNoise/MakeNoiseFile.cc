@@ -24,6 +24,7 @@ Be sure to compile with optimization enabled!  It makes a big difference.
 #include "TChain.h"
 #include <cassert>
 #include <cstdlib>
+#include <iostream>
 #include <fstream>
 
 EXOCoincidences coinc;
@@ -210,8 +211,6 @@ int main(int argc, char** argv)
       NumAcceptedFromThisRun++;
       NumEntriesAccepted++;
     } // Finish loop over entries in a particular run.
-    delete RawFile;
-    delete ProcFile;
   } // Finish loop over runs.
 
   // RRProducts[i, j][f] = < Re(X_i[f]) Re(X_j[f]) >; only entries with i <= j are stored.
