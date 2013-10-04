@@ -61,6 +61,8 @@ int main(int argc, char** argv)
   static mpi_handler mpi(argc, argv);
 #endif
   std::cout<<"Entered program."<<std::endl;
+  SafeStopwatch WholeProgramWatch("Whole program");
+  SafeStopwatch::tag WholeProgramTag = WholeProgramWatch.Start();
   std::string ProcessedFileName;
   std::string RawFileName;
   std::string OutFileName;
@@ -135,4 +137,5 @@ int main(int argc, char** argv)
 
   RefitSig.FlushEvents();
   OutputModule.ShutDown();
+  WholeProgramWatch.Stop(WholeProgramTag);
 }
