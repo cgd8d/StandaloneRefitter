@@ -1,19 +1,16 @@
 #ifndef EXORefitSignals_hh
 #define EXORefitSignals_hh
 
-#include "EXOUtilities/EXOTemplWaveform.hh"
 #include "SafeStopwatch.hh"
+#include "Rtypes.h"
 #include "mkl_cblas.h"
 #include "mkl_lapacke.h"
 #include "mkl_vml_functions.h"
 #include <string>
 #include <vector>
 #include <map>
-#include <list>
 #include <cassert>
 
-class EXOUWireSignal;
-class EXOTransferFunction;
 class EXOEventData;
 class EXOWaveformFT;
 class EXOTreeInputModule;
@@ -22,14 +19,22 @@ class TH3D;
 class TGraph;
 class TTree;
 
+#ifdef ENABLE_CHARGE
+#include "EXOUtilities/EXOTemplWaveform.hh"
+class EXOUWireSignal;
+class EXOTransferFunction;
+#endif
+
 struct EventHandler {
   // So we can grab the event again when we're done.
   Long64_t fEntryNumber;
   double fUnixTimeOfEvent;
   size_t fColumnLength;
+  size_t fNumSignals;
   size_t fNumIterSinceReset;
   size_t fNumIterations; // Count the number of times we've tried to terminate.
 
+#ifdef ENABLE_CHARGE
   // fWireModel keeps, for each u-wire signal we're fitting:
   //   the index of the u-wire signal within the event.
   //   model waveforms for channels which it affects.
@@ -38,6 +43,7 @@ struct EventHandler {
   // The ordering in the matrix is defined by the vector index, of course.
   std::vector<std::pair<size_t,
                         std::map<unsigned char, std::vector<double> > > > fWireModel;
+#endif
   // APD model information.
   std::map<unsigned char, double> fExpectedYieldPerGang; // Expected magnitudes of Th gamma line (ADC).
   std::vector<double> fmodel_realimag;
@@ -94,8 +100,10 @@ class EXORefitSignals
   void SetNoiseFilename(std::string name) { fNoiseFilename = name; }
   void SetLightmapFilename(std::string name) { fLightmapFilename = name; }
   void SetRThreshold(double threshold) { fRThreshold = threshold; }
+#ifdef ENABLE_CHARGE
   bool fAPDsOnly; // Do not denoise wire signals; and do not use u-wires to denoise APDs.
   bool fUseWireAPDCorrelations; // For now, this isn't higher performance -- just for testing.
+#endif
   bool fVerbose;
   size_t fDoRestarts; // 0 if we never restart; else, value indicates number of iterations before a restart.
 
@@ -144,6 +152,7 @@ class EXORefitSignals
   const size_t fMinF;
   const size_t fMaxF;
 
+#ifdef ENABLE_CHARGE
   // Wire digitization.
   EXODoubleWaveform fWireDeposit;
   EXODoubleWaveform fWireInduction;
@@ -151,6 +160,7 @@ class EXORefitSignals
                                     const EXOTransferFunction& transfer,
                                     const double Gain,
                                     const double Time) const;
+#endif
 
   // Interact with files.
   queue_type fEventHandlerQueue;
@@ -221,6 +231,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   bool Lagrange = (WHICH == 'L' or WHICH == 'A');
   bool Constraint = (WHICH == 'C' or WHICH == 'A');
 
+#ifdef ENABLE_CHARGE
   // First loop through wire signals.
   for(size_t m = 0; m < event.fWireModel.size(); m++) {
     const std::map<unsigned char, std::vector<double> >& models = event.fWireModel[m].second;
@@ -239,10 +250,10 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
       }
       const std::vector<double>& modelWF = it->second;
       for(size_t f = 0; f <= fMaxF - fMinF; f++) {
-        size_t Index1 = event.fColumnLength - (event.fWireModel.size()+1) + m;
+        size_t Index1 = event.fColumnLength - event.fNumSignals + m;
         size_t Index2 = 2*fChannels.size()*f + channel_index;
         const size_t DiagIndex = Index2;
-        for(size_t n = 0; n <= event.fWireModel.size(); n++) {
+        for(size_t n = 0; n < event.fNumSignals; n++) {
           if(Lagrange) out[Index2] += (Add ? 1 : -1)*modelWF[2*f]*fInvSqrtNoiseDiag[DiagIndex]*in[Index1];
           if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f]*fInvSqrtNoiseDiag[DiagIndex]*in[Index2];
           if(f < fMaxF-fMinF) {
@@ -255,6 +266,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
       }
     }
   } // Done with Lagrange and constraint terms for wires.
+#endif
   // Now, Lagrange and constraint terms for APDs.
   // This is where most of the time is spent, because we need to loop through all APD channels.
   // Furthermore, the APD channels are grouped together, making this portion of the code more matrix-friendly.
@@ -271,14 +283,14 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     vdMul(ExpectedYields.size(), &ExpectedYields[0], &fInvSqrtNoiseDiag[StartIndex], &Workspace[0]);
     if(Constraint) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                  1, event.fWireModel.size()+1, ExpectedYields.size(),
+                  1, event.fNumSignals, ExpectedYields.size(),
                   (Add ? 1 : -1)*event.fmodel_realimag[2*f], &Workspace[0], 1,
                   &in[StartIndex], event.fColumnLength,
                   1, &out[event.fColumnLength-1], event.fColumnLength);
     }
     if(Lagrange) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                  ExpectedYields.size(), event.fWireModel.size()+1, 1,
+                  ExpectedYields.size(), event.fNumSignals, 1,
                   (Add ? 1 : -1)*event.fmodel_realimag[2*f], &Workspace[0], ExpectedYields.size(),
                   &in[event.fColumnLength-1], event.fColumnLength,
                   1, &out[StartIndex], event.fColumnLength);
@@ -290,14 +302,14 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     vdMul(ExpectedYields.size(), &ExpectedYields[0], &fInvSqrtNoiseDiag[StartIndex], &Workspace[0]);
     if(Constraint) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                  1, event.fWireModel.size()+1, ExpectedYields.size(),
+                  1, event.fNumSignals, ExpectedYields.size(),
                   (Add ? 1 : -1)*event.fmodel_realimag[2*f+1], &Workspace[0], 1,
                   &in[StartIndex], event.fColumnLength,
                   1, &out[event.fColumnLength-1], event.fColumnLength);
     }
     if(Lagrange) {
       cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                  ExpectedYields.size(), event.fWireModel.size()+1, 1,
+                  ExpectedYields.size(), event.fNumSignals, 1,
                   (Add ? 1 : -1)*event.fmodel_realimag[2*f+1], &Workspace[0], ExpectedYields.size(),
                   &in[event.fColumnLength-1], event.fColumnLength,
                   1, &out[StartIndex], event.fColumnLength);

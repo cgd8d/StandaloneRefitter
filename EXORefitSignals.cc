@@ -18,16 +18,12 @@
 #include "EXOAnalysisManager/EXOTreeInputModule.hh"
 #include "EXOAnalysisManager/EXOTreeOutputModule.hh"
 #include "EXOCalibUtilities/EXOChannelMapManager.hh"
-#include "EXOCalibUtilities/EXOElectronicsShapers.hh"
-#include "EXOCalibUtilities/EXOUWireGains.hh"
 #include "EXOUtilities/EXOEventData.hh"
-#include "EXOUtilities/EXODigitizeWires.hh"
 #include "EXOUtilities/EXOWaveform.hh"
 #include "EXOUtilities/EXOWaveformFT.hh"
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
 #include "EXOUtilities/EXOTransferFunction.hh"
 #include "EXOUtilities/EXOMiscUtil.hh"
-#include "EXOUtilities/EXOUWireSignal.hh"
 #include "TFile.h"
 #include "TTree.h"
 #include "TArrayI.h"
@@ -42,6 +38,13 @@
 #include <algorithm>
 #include <fstream>
 #include <set>
+
+#ifdef ENABLE_CHARGE
+#include "EXOCalibUtilities/EXOElectronicsShapers.hh"
+#include "EXOCalibUtilities/EXOUWireGains.hh"
+#include "EXOUtilities/EXOUWireSignal.hh"
+#include "EXOUtilities/EXODigitizeWires.hh"
+#endif
 
 #ifdef USE_THREADS
 // We currently use the boost::threads library, if threading is enabled.
@@ -67,8 +70,11 @@ boost::mutex EventResultsMutex;
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
                                  TTree& wfTree,
                                  EXOTreeOutputModule& outputModule)
-: fAPDsOnly(false),
+:
+#ifdef ENABLE_CHARGE
+  fAPDsOnly(false),
   fUseWireAPDCorrelations(true),
+#endif
   fVerbose(false),
   fDoRestarts(100),
   fInputModule(inputModule),
@@ -107,8 +113,12 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // Construct the set of channels to keep.
   std::vector<unsigned char> ChannelsToUse;
   for(unsigned char i = 0; i < NUMBER_READOUT_CHANNELS; i++) {
+#ifdef ENABLE_CHARGE
     if(EXOMiscUtil::TypeOfChannel(i) == EXOMiscUtil::kVWire) continue; // No v wires for now.
     if(fAPDsOnly and EXOMiscUtil::TypeOfChannel(i) != EXOMiscUtil::kAPDGang) continue;
+#else
+    if(EXOMiscUtil::TypeOfChannel(i) != EXOMiscUtil::kAPDGang) continue;
+#endif
     if(ChannelMap.channel_suppressed_by_daq(i) or not ChannelMap.good_channel(i)) continue;
     ChannelsToUse.push_back(i);
   }
@@ -124,6 +134,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   FlushEvents();
 
   // Build a map from channel index to where it can be found in the noise file.
+  // Regardless of ENABLE_CHARGE, we assume that the noise file was constructed with u-wires and APDs.
   std::map<size_t, size_t> ChannelIndexMap;
   for(size_t i = 0; i < ChannelsToUse.size(); i++) {
     unsigned char software_channel = ChannelsToUse[i];
@@ -184,6 +195,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
 
       // Start with the real rows.
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
+#ifdef ENABLE_CHARGE
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
              EXOMiscUtil::TypeOfChannel(fChannels[index2])) {
@@ -191,6 +203,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
             continue;
           }
         }
+#endif
         size_t NoiseFileIndex2 = ChannelIndexMap[index2];
         size_t RowPos = ColumnPos + NoiseFileIndex2;
         block.push_back(FileBlock[RowPos]);
@@ -201,6 +214,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
       if(not IsFullBlock) continue;
       ColumnPos += FileNumChannels;
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
+#ifdef ENABLE_CHARGE
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
              EXOMiscUtil::TypeOfChannel(fChannels[index2])) {
@@ -208,6 +222,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
             continue;
           }
         }
+#endif
         size_t NoiseFileIndex2 = ChannelIndexMap[index2];
         size_t RowPos = ColumnPos + NoiseFileIndex2;
         block.push_back(FileBlock[RowPos]);
@@ -222,6 +237,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
 
       // Start with the real rows.
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
+#ifdef ENABLE_CHARGE
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
              EXOMiscUtil::TypeOfChannel(fChannels[index2])) {
@@ -229,6 +245,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
             continue;
           }
         }
+#endif
         size_t NoiseFileIndex2 = ChannelIndexMap[index2];
         size_t RowPos = ColumnPos + NoiseFileIndex2;
         block.push_back(FileBlock[RowPos]);
@@ -238,6 +255,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
       if(not IsFullBlock) continue;
       ColumnPos += FileNumChannels;
       for(size_t index2 = 0; index2 < fChannels.size(); index2++) {
+#ifdef ENABLE_CHARGE
         if(not fUseWireAPDCorrelations) {
           if(EXOMiscUtil::TypeOfChannel(fChannels[index1]) !=
              EXOMiscUtil::TypeOfChannel(fChannels[index2])) {
@@ -245,6 +263,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
             continue;
           }
         }
+#endif
         size_t NoiseFileIndex2 = ChannelIndexMap[index2];
         size_t RowPos = ColumnPos + NoiseFileIndex2;
         block.push_back(FileBlock[RowPos]);
@@ -312,6 +331,7 @@ int EXORefitSignals::Initialize()
   }
   delete LightmapFile;
 
+#ifdef ENABLE_CHARGE
   // If we're doing APDs only, we don't need to generate wire models.
   if(fAPDsOnly) return 0;
 
@@ -345,7 +365,7 @@ int EXORefitSignals::Initialize()
   double MaxVal = fWireDeposit.GetMaxValue();
   fWireDeposit /= MaxVal;
   fWireInduction /= MaxVal;
-
+#endif
   return 0;
 }
 
@@ -502,6 +522,7 @@ double EXORefitSignals::GetGain(unsigned char channel, EventHandler& event) cons
   return Gain;
 }
 
+#ifdef ENABLE_CHARGE
 std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
                                                    const EXOTransferFunction& transfer,
                                                    const double Gain,
@@ -535,6 +556,7 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
 
   return out;
 }
+#endif
 
 void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 {
@@ -545,6 +567,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fEntryNumber = entryNum;
   event->fNumIterations = 0;
   event->fNumIterSinceReset = 0;
+  event->fNumSignals = 0;
 
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
@@ -649,7 +672,9 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     event->fmodel_realimag[2*i - 2] = modelFT[i].real();
     if(i != modelFT.GetLength()-1) event->fmodel_realimag[2*i - 1] = modelFT[i].imag();
   }
+  event->fNumSignals += 1;
 
+#ifdef ENABLE_CHARGE
   // Now produce the expected wire signals.
   event->fWireModel.clear();
   if(not fAPDsOnly) {
@@ -730,10 +755,12 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
       event->fWireModel.push_back(std::make_pair(*sigIt, ModelForThisSignal));
     } // End loop over u-wire signals.
   } // (which we only did if we're handling wire signals.
+  event->fNumSignals += event->fWireModel.size();
+#endif
   GenerateExpectedSignalsWatch.Stop(GenerateExpectedSignalsTag);
 
   // For convenience, store the column length we'll be dealing with.
-  event->fColumnLength = 2*fChannels.size()*(fMaxF-fMinF) + fChannels.size() + event->fWireModel.size() + 1;
+  event->fColumnLength = 2*fChannels.size()*(fMaxF-fMinF) + fChannels.size() + event->fNumSignals;
 
   // We can find the appropriate preconditioner here.
   // This is a pretty good preconditioner, obtained by approximating A ~ {{D L} {trans(L) 0}},
@@ -743,29 +770,29 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // Find X using trans(X)X = trans(L) D^(-1) L.
   static SafeStopwatch FindHWatch("Find H");
   SafeStopwatch::tag FindHTag = FindHWatch.Start();
-  std::vector<double> Temp1(event->fColumnLength * (event->fWireModel.size()+1), 0);
-  std::vector<double> Temp2(event->fColumnLength * (event->fWireModel.size()+1), 0);
-  for(size_t i = 0; i < event->fWireModel.size()+1; i++) {
+  std::vector<double> Temp1(event->fColumnLength*event->fNumSignals, 0);
+  std::vector<double> Temp2(event->fColumnLength*event->fNumSignals, 0);
+  for(size_t i = 0; i < event->fNumSignals; i++) {
     Temp1[i*event->fColumnLength + fNoiseColumnLength + i] = 1;
   } // Temp1 = {{0}{I}}
   DoLagrangeAndConstraintMul<'L', true>(Temp1, Temp2, *event); // Temp2 = {{D^(-1/2)L} {0}}
-  Temp1.assign(event->fColumnLength * (event->fWireModel.size()+1), 0);
+  Temp1.assign(event->fColumnLength*event->fNumSignals, 0);
   DoLagrangeAndConstraintMul<'C', true>(Temp2, Temp1, *event); // Temp1 = {{0} {trans(L)D^(-1)L}}
   // Here I could produce a packed version; but I don't think the performance boost will be significant.
   // Remember X is a small matrix.
   // Produce the Cholesky decomposition, and store it in event->fPreconX.
   lapack_int ret;
-  ret = LAPACKE_dpotrf(LAPACK_COL_MAJOR, 'U', event->fWireModel.size()+1,
+  ret = LAPACKE_dpotrf(LAPACK_COL_MAJOR, 'U', event->fNumSignals,
                        &Temp1[fNoiseColumnLength], event->fColumnLength);
   if(ret != 0) {
     std::cout<<"Factorization to find H failed on entry "<<event->fEntryNumber<<
                " with ret = "<<ret<<std::endl;
     std::exit(1);
   }
-  event->fPreconX.assign((event->fWireModel.size()+1)*(event->fWireModel.size()+1), 0);
-  for(size_t i = 0; i < event->fWireModel.size()+1; i++) {
+  event->fPreconX.assign(event->fNumSignals*event->fNumSignals, 0);
+  for(size_t i = 0; i < event->fNumSignals; i++) {
     for(size_t j = 0; j <= i; j++) {
-      event->fPreconX[i*(event->fWireModel.size()+1) + j] =
+      event->fPreconX[i*event->fNumSignals + j] =
         Temp1[i*event->fColumnLength + fNoiseColumnLength + j];
     }
   }
@@ -776,10 +803,10 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // Since the RHS only has non-zero entries in the lower square, simplifications are used.
   static SafeStopwatch GuessXWatch("Initial guess for X");
   SafeStopwatch::tag GuessXTag = GuessXWatch.Start();
-  event->fX.assign(event->fColumnLength * (event->fWireModel.size()+1), 0);
-  for(size_t i = 0; i <= event->fWireModel.size(); i++) {
+  event->fX.assign(event->fColumnLength*event->fNumSignals, 0);
+  for(size_t i = 0; i < event->fNumSignals; i++) {
     size_t Index = (i+1)*event->fColumnLength; // Next column; then subtract.
-    Index -= event->fWireModel.size() + 1; // Step backward.
+    Index -= event->fNumSignals; // Step backward.
     Index += i; // Go forward to the right entry.
     event->fX[Index] = 1; // All models are normalized to 1.
   }
@@ -793,7 +820,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // Request a matrix multiplication of X.
   event->fResultIndex = RequestNoiseMul(event->fprecon_tmp, event->fColumnLength);
   fNumEventsHandled++; // One more event that will be actually handled.
-  fNumSignalsHandled += event->fWireModel.size() + 1;
+  fNumSignalsHandled += event->fNumSignals;
 
   // Push event onto the list of event handlers.
 #ifdef USE_LOCKFREE
@@ -848,12 +875,14 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     ED->GetScintillationCluster(i)->fRawEnergy = 0;
     ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
   }
+#ifdef ENABLE_CHARGE
   for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
     ED->GetUWireSignal(i)->fDenoisedEnergy = 0;
   }
   for(size_t i = 0; i < ED->GetNumChargeClusters(); i++) {
     ED->GetChargeCluster(i)->fDenoisedEnergy = 0;
   }
+#endif
 
   if(not event->fX.empty()) {
     if(fVerbose) std::cout<<"\tThis entry has denoised results to compute."<<std::endl;
@@ -893,7 +922,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     }
 
     // Produce estimates of the signals.
-    std::vector<double> Results(event->fWireModel.size()+1, 0);
+    std::vector<double> Results(event->fNumSignals, 0);
     for(size_t i = 0; i < Results.size(); i++) {
       for(size_t f = 0; f <= fMaxF-fMinF; f++) {
         for(size_t chan_index = 0; chan_index < fChannels.size(); chan_index++) {
@@ -909,6 +938,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     }
 
     // Translate signal magnitudes into corresponding objects.
+#ifdef ENABLE_CHARGE
     if(not fAPDsOnly) {
       for(size_t i = 0; i < event->fWireModel.size(); i++) {
         size_t sigIndex = event->fWireModel[i].first;
@@ -918,6 +948,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
         sig->fDenoisedEnergy = Results[i]*UWireScalingFactor;
       }
     }
+#endif
     ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
     ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
   } // End setting of denoised energy signals.
@@ -948,12 +979,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   if(event.fR.size() == 0) {
     // We're still in the setup phase.
     // Start by copying result into R.
-    FillFromNoise(event.fR, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
+    FillFromNoise(event.fR, event.fNumSignals, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, event.fR, event);
     // Now, R <-- B - R = B - AX.
     for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] = -event.fR[i];
-    for(size_t i = 0; i < event.fWireModel.size()+1; i++) {
+    for(size_t i = 0; i < event.fNumSignals; i++) {
       event.fR[i*event.fColumnLength + fNoiseColumnLength + i] += 1;
     }
     // Now precondition R appropriately.
@@ -973,7 +1004,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   else if(event.fV.size() == 0) {
     // At the beginning of the iteration, we just computed V = AP.
     fTotalIterationsDone++;
-    FillFromNoise(event.fV, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
+    FillFromNoise(event.fV, event.fNumSignals, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
     DoInvLPrecon(event.fV, event);
@@ -984,14 +1015,14 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Factorize fR0hat*V, so that we can solve equations using it twice.
     static SafeStopwatch FactorizeRVWatch("FactorizeRV");
     SafeStopwatch::tag FactorizeRVTag = FactorizeRVWatch.Start();
-    event.fR0hat_V_factors.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    event.fR0hat_V_factors.assign(event.fNumSignals*event.fNumSignals, 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
+                event.fNumSignals, event.fNumSignals, event.fColumnLength,
                 1, &event.fR0hat[0], event.fColumnLength, &event.fV[0], event.fColumnLength,
-                0, &event.fR0hat_V_factors[0], event.fWireModel.size() + 1);
-    event.fR0hat_V_pivot.resize(event.fWireModel.size()+1);
-    ret = LAPACKE_dgetrf(LAPACK_COL_MAJOR, event.fWireModel.size()+1, event.fWireModel.size()+1,
-                         &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
+                0, &event.fR0hat_V_factors[0], event.fNumSignals);
+    event.fR0hat_V_pivot.resize(event.fNumSignals);
+    ret = LAPACKE_dgetrf(LAPACK_COL_MAJOR, event.fNumSignals, event.fNumSignals,
+                         &event.fR0hat_V_factors[0], event.fNumSignals,
                          &event.fR0hat_V_pivot[0]);
     if(ret != 0) {
       std::cout<<"Factorization of fR0hat.V failed on entry "<<event.fEntryNumber<<
@@ -1002,16 +1033,16 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Now compute alpha.
     static SafeStopwatch ComputeAlphaWatch("ComputeAlpha");
     SafeStopwatch::tag ComputeAlphaTag = ComputeAlphaWatch.Start();
-    event.fAlpha.assign((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    event.fAlpha.assign(event.fNumSignals*event.fNumSignals, 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
+                event.fNumSignals, event.fNumSignals, event.fColumnLength,
                 1, &event.fR0hat[0], event.fColumnLength, &event.fR[0], event.fColumnLength,
-                0, &event.fAlpha[0], event.fWireModel.size() + 1);
+                0, &event.fAlpha[0], event.fNumSignals);
     ret = LAPACKE_dgetrs(LAPACK_COL_MAJOR, 'N',
-                         event.fWireModel.size()+1, event.fWireModel.size()+1,
-                         &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
+                         event.fNumSignals, event.fNumSignals,
+                         &event.fR0hat_V_factors[0], event.fNumSignals,
                          &event.fR0hat_V_pivot[0],
-                         &event.fAlpha[0], event.fWireModel.size()+1);
+                         &event.fAlpha[0], event.fNumSignals);
     if(ret != 0) {
       std::cout<<"Solving for alpha failed on entry "<<event.fEntryNumber<<
                  " with ret = "<<ret<<std::endl;
@@ -1022,8 +1053,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     static SafeStopwatch UpdateRWatch("UpdateR");
     SafeStopwatch::tag UpdateRTag = UpdateRWatch.Start();
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
-                -1, &event.fV[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
+                event.fColumnLength, event.fNumSignals, event.fNumSignals,
+                -1, &event.fV[0], event.fColumnLength, &event.fAlpha[0], event.fNumSignals,
                 1, &event.fR[0], event.fColumnLength);
     // Now we desire T = AR (AS in paper).  Request a matrix multiplication, and return.
     // Remember to apply preconditioner here too.
@@ -1037,7 +1068,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   else {
     // We're in the second half of the iteration, where T was just computed.
     std::vector<double> T;
-    FillFromNoise(T, event.fWireModel.size()+1, event.fColumnLength, event.fResultIndex);
+    FillFromNoise(T, event.fNumSignals, event.fColumnLength, event.fResultIndex);
     // Now need to finish multiplying by A, accounting for the other terms.
     DoRestOfMultiplication(event.fprecon_tmp, T, event);
     // Finish preconditioner.
@@ -1062,8 +1093,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     static SafeStopwatch UpdateXRWatch("UpdateXR");
     SafeStopwatch::tag UpdateXRTag = UpdateXRWatch.Start();
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
-                1, &event.fP[0], event.fColumnLength, &event.fAlpha[0], event.fWireModel.size() + 1,
+                event.fColumnLength, event.fNumSignals, event.fNumSignals,
+                1, &event.fP[0], event.fColumnLength, &event.fAlpha[0], event.fNumSignals,
                 1, &event.fX[0], event.fColumnLength);
     for(size_t i = 0; i < event.fX.size(); i++) {
       // Do both together -- reduces the number of calls to memory.
@@ -1089,16 +1120,16 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Now compute beta, solving R0hat_V beta = -R0hat_T
     static SafeStopwatch FindBetaWatch("FindBeta");
     SafeStopwatch::tag FindBetaTag = FindBetaWatch.Start();
-    std::vector<double> Beta((event.fWireModel.size()+1)*(event.fWireModel.size()+1), 0);
+    std::vector<double> Beta(event.fNumSignals*event.fNumSignals, 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-                event.fWireModel.size() + 1, event.fWireModel.size() + 1, event.fColumnLength,
+                event.fNumSignals, event.fNumSignals, event.fColumnLength,
                 -1, &event.fR0hat[0], event.fColumnLength, &T[0], event.fColumnLength,
-                0, &Beta[0], event.fWireModel.size() + 1);
+                0, &Beta[0], event.fNumSignals);
     ret = LAPACKE_dgetrs(LAPACK_COL_MAJOR, 'N',
-                         event.fWireModel.size()+1, event.fWireModel.size()+1,
-                         &event.fR0hat_V_factors[0], event.fWireModel.size()+1,
+                         event.fNumSignals, event.fNumSignals,
+                         &event.fR0hat_V_factors[0], event.fNumSignals,
                          &event.fR0hat_V_pivot[0],
-                         &Beta[0], event.fWireModel.size()+1);
+                         &Beta[0], event.fNumSignals);
     if(ret != 0) {
       std::cout<<"Solving for beta failed on entry "<<event.fEntryNumber<<
                  " with ret = "<<ret<<std::endl;
@@ -1111,8 +1142,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     T = event.fR;
     for(size_t i = 0; i < event.fP.size(); i++) event.fP[i] -= omega*event.fV[i];
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                event.fColumnLength, event.fWireModel.size() + 1, event.fWireModel.size() + 1,
-                1, &event.fP[0], event.fColumnLength, &Beta[0], event.fWireModel.size() + 1,
+                event.fColumnLength, event.fNumSignals, event.fNumSignals,
+                1, &event.fP[0], event.fColumnLength, &Beta[0], event.fNumSignals,
                 1, &T[0], event.fColumnLength);
     std::swap(T, event.fP);
     UpdatePWatch.Stop(UpdatePTag);
@@ -1156,7 +1187,7 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
     ChannelFactors *= GetGain(fChannels[k], event);
     ChannelFactors *= event.fExpectedYieldPerGang.at(fChannels[k]);
 
-    for(size_t n = 0; n <= event.fWireModel.size(); n++) { // signals
+    for(size_t n = 0; n < event.fNumSignals; n++) { // signals
       // Compute the factors common to all frequencies.
       double CommonFactor = 0;
       for(size_t g = 0; g <= fMaxF - fMinF; g++) {
@@ -1263,12 +1294,12 @@ void EXORefitSignals::DoInvLPrecon(std::vector<double>& in, EventHandler& event)
   // Multiply by K1_inv in-place.
   static SafeStopwatch DoInvLPreconWatch("DoInvLPrecon");
   SafeStopwatch::tag DoInvLPreconTag = DoInvLPreconWatch.Start();
-  mkl_dimatcopy('C', 'N', event.fWireModel.size()+1, event.fWireModel.size()+1,
+  mkl_dimatcopy('C', 'N', event.fNumSignals, event.fNumSignals,
                 -1, &in[fNoiseColumnLength], event.fColumnLength, event.fColumnLength); // in = {{v1} {-v2}}
   DoLagrangeAndConstraintMul<'C', true>(in, in, event); // in = {{v1} {trans(L)D^(-1/2)v1 - v2}}
   cblas_dtrsm(CblasColMajor, CblasLeft, CblasUpper, CblasTrans, CblasNonUnit,
-              event.fWireModel.size()+1, event.fWireModel.size()+1,
-              1, &event.fPreconX[0], event.fWireModel.size()+1,
+              event.fNumSignals, event.fNumSignals,
+              1, &event.fPreconX[0], event.fNumSignals,
               &in[fNoiseColumnLength], event.fColumnLength);
   // in = {{v1} {Inv(trans(X))(trans(L)D^(-1)v1 - v2)}}.
   DoInvLPreconWatch.Stop(DoInvLPreconTag);
@@ -1280,8 +1311,8 @@ void EXORefitSignals::DoInvRPrecon(std::vector<double>& in, EventHandler& event)
   static SafeStopwatch DoInvRPreconWatch("DoInvRPrecon");
   SafeStopwatch::tag DoInvRPreconTag = DoInvRPreconWatch.Start();
   cblas_dtrsm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
-              event.fWireModel.size()+1, event.fWireModel.size()+1,
-              1, &event.fPreconX[0], event.fWireModel.size()+1,
+              event.fNumSignals, event.fNumSignals,
+              1, &event.fPreconX[0], event.fNumSignals,
               &in[fNoiseColumnLength], event.fColumnLength); // in = {{v1} {X^(-1)v2}}
   DoLagrangeAndConstraintMul<'L', false>(in, in, event); // in = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
   DoInvRPreconWatch.Stop(DoInvRPreconTag);
@@ -1293,8 +1324,8 @@ void EXORefitSignals::DoLPrecon(std::vector<double>& in, EventHandler& event)
   static SafeStopwatch DoLPreconWatch("DoLPrecon");
   SafeStopwatch::tag DoLPreconTag = DoLPreconWatch.Start();
   cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasTrans, CblasNonUnit,
-              event.fWireModel.size()+1, event.fWireModel.size()+1,
-              -1, &event.fPreconX[0], event.fWireModel.size()+1,
+              event.fNumSignals, event.fNumSignals,
+              -1, &event.fPreconX[0], event.fNumSignals,
               &in[fNoiseColumnLength], event.fColumnLength); // in = {{v1} {-trans(X)v2}}
   DoLagrangeAndConstraintMul<'C', true>(in, in, event); // in = {{v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
   DoLPreconWatch.Stop(DoLPreconTag);
@@ -1307,8 +1338,8 @@ void EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHandler& event)
   SafeStopwatch::tag DoRPreconTag = DoRPreconWatch.Start();
   DoLagrangeAndConstraintMul<'L', true>(in, in, event); // out = {{v1 + D^(-1/2)Lv2} {v2}}
   cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
-              event.fWireModel.size()+1, event.fWireModel.size()+1,
-              1, &event.fPreconX[0], event.fWireModel.size()+1,
+              event.fNumSignals, event.fNumSignals,
+              1, &event.fPreconX[0], event.fNumSignals,
               &in[fNoiseColumnLength], event.fColumnLength); // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
   DoRPreconWatch.Stop(DoRPreconTag);
 }
@@ -1484,7 +1515,7 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
   DoLPrecon(R_unprec, event);
   double WorstNorm = 0;
 
-  for(size_t col = 0; col <= event.fWireModel.size(); col++) {
+  for(size_t col = 0; col < event.fNumSignals; col++) {
     size_t ColIndex = col*event.fColumnLength;
     size_t NextCol = ColIndex + event.fColumnLength;
     double Norm = 0;
