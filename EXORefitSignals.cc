@@ -29,7 +29,6 @@
 #include "TArrayI.h"
 #include "TH3D.h"
 #include "TGraph.h"
-#include "MKL_adaptors.hh"
 #include "mkl_trans.h"
 #include <iomanip>
 #include <iostream>
