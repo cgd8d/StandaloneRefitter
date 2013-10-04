@@ -57,7 +57,8 @@ struct mpi_handler
 int main(int argc, char** argv)
 {
 #ifdef USE_THREADS
-  static mpi_handler mpi; // This should be the very first thing created, and the very last destroyed.
+  // This should be the very first thing created, and the very last destroyed (as nearly as possible).
+  static mpi_handler mpi(argc, argv);
 #endif
   std::cout<<"Entered program."<<std::endl;
   std::string ProcessedFileName;
