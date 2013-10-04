@@ -10,7 +10,7 @@ basepath = '/nfs/slac/g/exo_data4/users/cgd8d/rhel5-64'
 
 os.environ['INPUT_LOCATION'] = os.path.join(basepath, 'DenoisedFiles')
 os.environ['OUTPUT_LOCATION'] = os.path.join(basepath, 'ReprocessedFiles')
-with open(os.path.join(basepath, 'Refitter', 'PostProcessing', 'Reprocess.exo') as InEXO:
+with open(os.path.join(basepath, 'Refitter', 'PostProcessing', 'Reprocess.exo'), 'r') as InEXO:
     EXOTemplate = string.Template(InEXO.read())
 
 for filename in glob.glob(os.path.join(basepath, 'DenoisedFiles', '*')):
@@ -20,5 +20,5 @@ for filename in glob.glob(os.path.join(basepath, 'DenoisedFiles', '*')):
         OutEXO.write(EXOTemplate.substitute(os.environ))
 
 for filename in glob.glob(os.path.join(basepath, 'EXOs', '*')):
-    subprocess.call(['bsub', '-o', filename[:-3]+'log', '-q', 'long', 'EXOAnalysis', filename])
+    subprocess.call(['bsub', '-o', filename[:-3]+'log', '-q', 'long', '-R', 'rhel50', 'EXOAnalysis', filename])
 
