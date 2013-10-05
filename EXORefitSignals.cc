@@ -972,7 +972,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   static SafeStopwatch DoRestOfMulWatch("DoBlBiCGSTAB::DoRestOfMul (threaded)");
   static SafeStopwatch DoPreconWatch("DoBlBiCGSTAB::Do*Precon (threaded)");
   static SafeStopwatch CanTerminateWatch("DoBlBiCGSTAB::CanTerminate (threaded)");
-
+  static SafeStopwatch MulSkinnySmallWatch("DoBlBiCGSTAB: mul skinny by small matrices (threaded)");
+  static SafeStopwatch MulSkinnySkinnyWatch("DoBlBiCGSTAB: mul skinny by skinny matrices (threaded)");
 
   if(event.fR.size() == 0) {
     // We're still in the setup phase.
@@ -1040,10 +1041,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
 
     // Factorize fR0hat*V, so that we can solve equations using it twice.
     event.fR0hat_V_factors.assign(event.fNumSignals*event.fNumSignals, 0);
+    SafeStopwatch::tag MulSkinnySkinnyTag = MulSkinnySkinnyWatch.Start();
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fNumSignals, event.fNumSignals, event.fColumnLength,
                 1, &event.fR0hat[0], event.fColumnLength, &event.fV[0], event.fColumnLength,
                 0, &event.fR0hat_V_factors[0], event.fNumSignals);
+    MulSkinnySkinnyWatch.Stop(MulSkinnySkinnyTag);
     event.fR0hat_V_pivot.resize(event.fNumSignals);
     ret = LAPACKE_dgetrf(LAPACK_COL_MAJOR, event.fNumSignals, event.fNumSignals,
                          &event.fR0hat_V_factors[0], event.fNumSignals,
@@ -1055,10 +1058,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     }
     // Now compute alpha.
     event.fAlpha.assign(event.fNumSignals*event.fNumSignals, 0);
+    MulSkinnySkinnyTag = MulSkinnySkinnyWatch.Start();
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fNumSignals, event.fNumSignals, event.fColumnLength,
                 1, &event.fR0hat[0], event.fColumnLength, &event.fR[0], event.fColumnLength,
                 0, &event.fAlpha[0], event.fNumSignals);
+    MulSkinnySkinnyWatch.Stop(MulSkinnySkinnyTag);
     ret = LAPACKE_dgetrs(LAPACK_COL_MAJOR, 'N',
                          event.fNumSignals, event.fNumSignals,
                          &event.fR0hat_V_factors[0], event.fNumSignals,
@@ -1070,10 +1075,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       std::exit(1);
     }
     // Update R <-- R - V*alpha.
+    SafeStopwatch::tag MulSkinnySmallTag = MulSkinnySmallWatch.Start();
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fColumnLength, event.fNumSignals, event.fNumSignals,
                 -1, &event.fV[0], event.fColumnLength, &event.fAlpha[0], event.fNumSignals,
                 1, &event.fR[0], event.fColumnLength);
+    MulSkinnySmallWatch.Stop(MulSkinnySmallTag);
     // Now we desire T = AR (AS in paper).  Request a matrix multiplication, and return.
     // Remember to apply preconditioner here too.
     event.fprecon_tmp = event.fR;
@@ -1114,10 +1121,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     double omega = rdott/tdott;
 
     // Modify X and R.
+    SafeStopwatch::tag MulSkinnySmallTag = MulSkinnySmallWatch.Start();
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fColumnLength, event.fNumSignals, event.fNumSignals,
                 1, &event.fP[0], event.fColumnLength, &event.fAlpha[0], event.fNumSignals,
                 1, &event.fX[0], event.fColumnLength);
+    MulSkinnySmallWatch.Stop(MulSkinnySmallTag);
     for(size_t i = 0; i < event.fX.size(); i++) {
       // Do both together -- reduces the number of calls to memory.
       event.fX[i] += omega*event.fR[i];
@@ -1148,10 +1157,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
 
     // Now compute beta, solving R0hat_V beta = -R0hat_T
     std::vector<double> Beta(event.fNumSignals*event.fNumSignals, 0);
+    SafeStopwatch::tag MulSkinnySkinnyTag = MulSkinnySkinnyWatch.Start();
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fNumSignals, event.fNumSignals, event.fColumnLength,
                 -1, &event.fR0hat[0], event.fColumnLength, &T[0], event.fColumnLength,
                 0, &Beta[0], event.fNumSignals);
+    MulSkinnySkinnyWatch.Stop(MulSkinnySkinnyTag);
     ret = LAPACKE_dgetrs(LAPACK_COL_MAJOR, 'N',
                          event.fNumSignals, event.fNumSignals,
                          &event.fR0hat_V_factors[0], event.fNumSignals,
@@ -1166,10 +1177,12 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Update P.  Overwrite T for temporary work.
     T = event.fR;
     for(size_t i = 0; i < event.fP.size(); i++) event.fP[i] -= omega*event.fV[i];
+    MulSkinnySmallTag = MulSkinnySmallWatch.Start();
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fColumnLength, event.fNumSignals, event.fNumSignals,
                 1, &event.fP[0], event.fColumnLength, &Beta[0], event.fNumSignals,
                 1, &T[0], event.fColumnLength);
+    MulSkinnySmallWatch.Stop(MulSkinnySmallTag);
     std::swap(T, event.fP);
 
     // Clear vectors in event which are no longer needed -- this helps us keep track of where we are.
@@ -1195,8 +1208,15 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
 {
   // After noise terms have already been handled, deal with all of the others.
   // This should not be the bottleneck.
+  static SafeStopwatch PoissonMulWatch("DoBlBiCGSTAB::DoRestOfMul::Poisson (threaded)");
+  SafeStopwatch::tag PoissonMulTag = PoissonMulWatch.Start();
   DoPoissonMultiplication(in, out, event);
+  PoissonMulWatch.Stop(PoissonMulTag);
+
+  static SafeStopwatch LandCMulWatch("DoBlBiCGSTAB::DoRestOfMul::L&C (threaded)");
+  SafeStopwatch::tag LandCMulTag = LandCMulWatch.Start();
   DoLagrangeAndConstraintMul<'A', true>(in, out, event);
+  LandCMulWatch.Stop(LandCMulTag);
 }
 
 void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
