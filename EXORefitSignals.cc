@@ -76,6 +76,7 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
 #endif
   fVerbose(false),
   fDoRestarts(100),
+  fNumMulsToAccumulate(500),
   fInputModule(inputModule),
   fWFTree(wfTree),
   fOutputModule(outputModule),
@@ -152,6 +153,10 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   }
   fNoiseColumnLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
   size_t FileNumChannels = NUMBER_READOUT_CHANNELS - 2*NCHANNEL_PER_WIREPLANE;
+
+  // Pre-allocate memory for noise multiplication, plus a little extra (in case of multiple signals per event).
+  // We don't pre-allocate fNoiseMulResult because that won't get allocated incrementally.
+  fNoiseMulQueue.reserve(fNoiseColumnLength*(fNumMulsToAccumulate+5));
 
   // Then fill fNoiseCorrelations.
   // Note that we store the same-frequency blocks in column-major order,
@@ -846,7 +851,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   InitHandlingOfXWatch.Stop(InitHandlingOfXTag);
 
   // Now, while there are enough requests in the queue, satisfy those requests.
-  while(fNumVectorsInQueue > 500) DoPassThroughEvents();
+  while(fNumVectorsInQueue >= fNumMulsToAccumulate) DoPassThroughEvents();
 }
 
 void EXORefitSignals::FlushEvents()

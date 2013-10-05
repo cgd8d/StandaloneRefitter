@@ -106,6 +106,7 @@ class EXORefitSignals
 #endif
   bool fVerbose;
   size_t fDoRestarts; // 0 if we never restart; else, value indicates number of iterations before a restart.
+  size_t fNumMulsToAccumulate;
 
   int Initialize();
   void AcceptEvent(EXOEventData* ED, Long64_t entryNum);
