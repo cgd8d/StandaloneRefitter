@@ -283,4 +283,5 @@ int main(int argc, char** argv)
     assert(outfile.sputn((char*)&NoiseCorrelations[f][0], numChars) == numChars);
   }
   std::cout<<"Done; closing file as we terminate."<<std::endl;
+  std::cout<<NumEntriesAccepted<<" entries were used in creating this noise correlation file."<<std::endl;
 }
