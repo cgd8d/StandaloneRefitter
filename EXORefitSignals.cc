@@ -104,8 +104,6 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // against that is small.
   // For the future, might consider whether we can rearrange EXONoiseCorrelations to be
   // more convenient for this.
-  static SafeStopwatch FillNoiseCorrWatch("FillNoiseCorrelations");
-  SafeStopwatch::tag FillNoiseCorrTag = FillNoiseCorrWatch.Start();
 
   // Get the channel map.
   const EXOChannelMap& ChannelMap = GetChanMapForHeader(ED.fEventHeader);
@@ -124,10 +122,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   }
 
   // If the channel mapping is unchanged, do nothing.
-  if(ChannelsToUse == fChannels) {
-    FillNoiseCorrWatch.Stop(FillNoiseCorrTag);
-    return;
-  }
+  if(ChannelsToUse == fChannels) return;
 
   // Else, we'll need to extract the noise information to match the new ordering.
   // Start by flushing all currently-held events, since the noise information will change.
@@ -294,7 +289,6 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
       }
     }
   }
-  FillNoiseCorrWatch.Stop(FillNoiseCorrTag);
 }
 
 int EXORefitSignals::Initialize()
@@ -566,7 +560,8 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 {
   // Push in one more event to handle; return whatever events are able to finish.
   // Do whatever matrix multiplications are now warranted.
-
+  static SafeStopwatch BeginAcceptEventWatch("AcceptEvent beginning (sequential)");
+  SafeStopwatch::tag BeginAcceptEventTag = BeginAcceptEventWatch.Start();
   EventHandler* event = new EventHandler;
   event->fEntryNumber = entryNum;
   event->fNumIterations = 0;
@@ -576,12 +571,14 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
     FinishEvent(event);
+    BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
 
   // If the waveforms aren't full-length, skip for now (although we should be able to handle them later).
   if(ED->fEventHeader.fSampleCount != 2047) {
     FinishEvent(event);
+    BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
 
@@ -589,6 +586,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // There's nothing theoretical that warrants this; it's just easier to code up.
   if(ED->GetNumScintillationClusters() != 1) {
     FinishEvent(event);
+    BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
   EXOScintillationCluster* scint = ED->GetScintillationCluster(0);
@@ -604,6 +602,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   }
   if(FullClusters.empty()) {
     FinishEvent(event);
+    BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
 
@@ -661,11 +660,10 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   }
   if(not HasYield) {
     FinishEvent(event);
+    BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
 
-  static SafeStopwatch GenerateExpectedSignalsWatch("GenerateExpectedSignals");
-  SafeStopwatch::tag GenerateExpectedSignalsTag = GenerateExpectedSignalsWatch.Start();
   // Generate the expected light signal shape (normalized), given the time of the scintillation.
   // Alternate between real and imaginary parts, mimicking the variable ordering we use throughout.
   // Also drop the zero-frequency component (which isn't used)
@@ -761,7 +759,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   } // (which we only did if we're handling wire signals.
   event->fNumSignals += event->fWireModel.size();
 #endif
-  GenerateExpectedSignalsWatch.Stop(GenerateExpectedSignalsTag);
 
   // For convenience, store the column length we'll be dealing with.
   event->fColumnLength = 2*fChannels.size()*(fMaxF-fMinF) + fChannels.size() + event->fNumSignals;
@@ -772,8 +769,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // Poisson noise terms.
   // Haven't decided yet whether it's important to include Poisson terms on the diagonal; currently I don't.
   // Find X using trans(X)X = trans(L) D^(-1) L.
-  static SafeStopwatch FindHWatch("Find H");
-  SafeStopwatch::tag FindHTag = FindHWatch.Start();
   std::vector<double> Temp1(event->fColumnLength*event->fNumSignals, 0);
   std::vector<double> Temp2(event->fColumnLength*event->fNumSignals, 0);
   for(size_t i = 0; i < event->fNumSignals; i++) {
@@ -800,13 +795,10 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
         Temp1[i*event->fColumnLength + fNoiseColumnLength + j];
     }
   }
-  FindHWatch.Stop(FindHTag);
 
   // Give a really nice initial guess for X, obtained by solving exactly
   // with the approximate version of the matrix used for preconditioning.
   // Since the RHS only has non-zero entries in the lower square, simplifications are used.
-  static SafeStopwatch GuessXWatch("Initial guess for X");
-  SafeStopwatch::tag GuessXTag = GuessXWatch.Start();
   event->fX.assign(event->fColumnLength*event->fNumSignals, 0);
   for(size_t i = 0; i < event->fNumSignals; i++) {
     size_t Index = (i+1)*event->fColumnLength; // Next column; then subtract.
@@ -815,9 +807,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     event->fX[Index] = 1; // All models are normalized to 1.
   }
   DoInvLPrecon(event->fX, *event);
-  GuessXWatch.Stop(GuessXTag);
-  static SafeStopwatch InitHandlingOfXWatch("Initial computations to prepare for handling");
-  SafeStopwatch::tag InitHandlingOfXTag = InitHandlingOfXWatch.Start();
   event->fprecon_tmp = event->fX;
   DoInvRPrecon(event->fprecon_tmp, *event); // Beginning of multiplying by matrix.
 
@@ -848,7 +837,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     assert(fEventHandlerQueue.unsynchronized_push(evt));
   }
 #endif
-  InitHandlingOfXWatch.Stop(InitHandlingOfXTag);
+  BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
 
   // Now, while there are enough requests in the queue, satisfy those requests.
   while(fNumVectorsInQueue >= fNumMulsToAccumulate) DoPassThroughEvents();
@@ -865,8 +854,6 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 {
   // Compute and fill denoised signals, as appropriate.
   // Then pass the filled event to the output module.
-  static SafeStopwatch FinishEventWatch("Finishing event");
-  SafeStopwatch::tag FinishEventTag = FinishEventWatch.Start();
 #ifdef USE_THREADS
   FinishEventMutex.lock(); // Wait until we get a lock.
 #endif
@@ -962,7 +949,6 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 #ifdef USE_THREADS
   FinishEventMutex.unlock(); // Release access to tinput and toutput for other threads.
 #endif
-  FinishEventWatch.Stop(FinishEventTag);
   delete event;
 }
 
@@ -980,45 +966,79 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
   // A. EL GUENNOUNI, K. JBILOU, AND H. SADOK.
   lapack_int ret;
 
+  // A number of watches -- we want to break down BiCGSTAB time by *type* of activity.
+  static SafeStopwatch FillFromNoiseWatch("DoBlBiCGSTAB::FillFromNoise (threaded)");
+  static SafeStopwatch RequestNoiseMulWatch("DoBlBiCGSTAB::RequestNoiseMul (threaded)");
+  static SafeStopwatch DoRestOfMulWatch("DoBlBiCGSTAB::DoRestOfMul (threaded)");
+  static SafeStopwatch DoPreconWatch("DoBlBiCGSTAB::Do*Precon (threaded)");
+  static SafeStopwatch CanTerminateWatch("DoBlBiCGSTAB::CanTerminate (threaded)");
+
+
   if(event.fR.size() == 0) {
     // We're still in the setup phase.
+
     // Start by copying result into R.
+    SafeStopwatch::tag FillFromNoiseTag = FillFromNoiseWatch.Start();
     FillFromNoise(event.fR, event.fNumSignals, event.fColumnLength, event.fResultIndex);
+    FillFromNoiseWatch.Stop(FillFromNoiseTag);
+
     // Now need to finish multiplying by A, accounting for the other terms.
+    SafeStopwatch::tag DoRestOfMulTag = DoRestOfMulWatch.Start();
     DoRestOfMultiplication(event.fprecon_tmp, event.fR, event);
+    DoRestOfMulWatch.Stop(DoRestOfMulTag);
+
     // Now, R <-- B - R = B - AX.
     for(size_t i = 0; i < event.fR.size(); i++) event.fR[i] = -event.fR[i];
     for(size_t i = 0; i < event.fNumSignals; i++) {
       event.fR[i*event.fColumnLength + fNoiseColumnLength + i] += 1;
     }
+
     // Now precondition R appropriately.
+    SafeStopwatch::tag DoPreconTag = DoPreconWatch.Start();
     DoInvLPrecon(event.fR, event);
+    DoPreconWatch.Stop(DoPreconTag);
+
     // Might as well check if we can terminate right off the bat.  Not impossible!
-    if(CanTerminate(event)) return true;
+    {
+      SafeStopwatch::tag CanTerminateTag = CanTerminateWatch.Start();
+      bool CanTerminateRet = CanTerminate(event);
+      CanTerminateWatch.Stop(CanTerminateTag);
+      if(CanTerminateRet) return true;
+    }
+
     // Set up other pieces of the handler.
     event.fP = event.fR;
     event.fR0hat = event.fR;
+
     // We'll take K1_inv A K2_inv P, so compute K2_inv P.
     event.fprecon_tmp = event.fP;
+
+    DoPreconTag = DoPreconWatch.Start();
     DoInvRPrecon(event.fprecon_tmp, event);
+    DoPreconWatch.Stop(DoPreconTag);
+
     // Now we want V <- AP, so request a multiplication by P.
+    SafeStopwatch::tag RequestNoiseMulTag = RequestNoiseMulWatch.Start();
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
+    RequestNoiseMulWatch.Stop(RequestNoiseMulTag);
     return false;
   }
   else if(event.fV.size() == 0) {
     // At the beginning of the iteration, we just computed V = AP.
     fTotalIterationsDone++;
+    SafeStopwatch::tag FillFromNoiseTag = FillFromNoiseWatch.Start();
     FillFromNoise(event.fV, event.fNumSignals, event.fColumnLength, event.fResultIndex);
-    // Now need to finish multiplying by A, accounting for the other terms.
-    DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
-    DoInvLPrecon(event.fV, event);
+    FillFromNoiseWatch.Stop(FillFromNoiseTag);
 
-    static SafeStopwatch fVBlockWatch("fVBlock");
-    SafeStopwatch::tag fVBlockTag = fVBlockWatch.Start();
+    // Now need to finish multiplying by A, accounting for the other terms.
+    SafeStopwatch::tag DoRestOfMulTag = DoRestOfMulWatch.Start();
+    DoRestOfMultiplication(event.fprecon_tmp, event.fV, event);
+    DoRestOfMulWatch.Stop(DoRestOfMulTag);
+    SafeStopwatch::tag DoPreconTag = DoPreconWatch.Start();
+    DoInvLPrecon(event.fV, event);
+    DoPreconWatch.Stop(DoPreconTag);
 
     // Factorize fR0hat*V, so that we can solve equations using it twice.
-    static SafeStopwatch FactorizeRVWatch("FactorizeRV");
-    SafeStopwatch::tag FactorizeRVTag = FactorizeRVWatch.Start();
     event.fR0hat_V_factors.assign(event.fNumSignals*event.fNumSignals, 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fNumSignals, event.fNumSignals, event.fColumnLength,
@@ -1033,10 +1053,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                  " with ret = "<<ret<<std::endl;
       std::exit(1);
     }
-    FactorizeRVWatch.Stop(FactorizeRVTag);
     // Now compute alpha.
-    static SafeStopwatch ComputeAlphaWatch("ComputeAlpha");
-    SafeStopwatch::tag ComputeAlphaTag = ComputeAlphaWatch.Start();
     event.fAlpha.assign(event.fNumSignals*event.fNumSignals, 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fNumSignals, event.fNumSignals, event.fColumnLength,
@@ -1052,10 +1069,7 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                  " with ret = "<<ret<<std::endl;
       std::exit(1);
     }
-    ComputeAlphaWatch.Stop(ComputeAlphaTag);
     // Update R <-- R - V*alpha.
-    static SafeStopwatch UpdateRWatch("UpdateR");
-    SafeStopwatch::tag UpdateRTag = UpdateRWatch.Start();
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fColumnLength, event.fNumSignals, event.fNumSignals,
                 -1, &event.fV[0], event.fColumnLength, &event.fAlpha[0], event.fNumSignals,
@@ -1063,27 +1077,33 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
     // Now we desire T = AR (AS in paper).  Request a matrix multiplication, and return.
     // Remember to apply preconditioner here too.
     event.fprecon_tmp = event.fR;
-    UpdateRWatch.Stop(UpdateRTag);
-    fVBlockWatch.Stop(fVBlockTag);
+    DoPreconTag = DoPreconWatch.Start();
     DoInvRPrecon(event.fprecon_tmp, event);
+    DoPreconWatch.Stop(DoPreconTag);
+
+    SafeStopwatch::tag RequestNoiseMulTag = RequestNoiseMulWatch.Start();
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
+    RequestNoiseMulWatch.Stop(RequestNoiseMulTag);
     return false;
   }
   else {
     // We're in the second half of the iteration, where T was just computed.
     std::vector<double> T;
+    SafeStopwatch::tag FillFromNoiseTag = FillFromNoiseWatch.Start();
     FillFromNoise(T, event.fNumSignals, event.fColumnLength, event.fResultIndex);
-    // Now need to finish multiplying by A, accounting for the other terms.
-    DoRestOfMultiplication(event.fprecon_tmp, T, event);
-    // Finish preconditioner.
-    DoInvLPrecon(T, event);
+    FillFromNoiseWatch.Stop(FillFromNoiseTag);
 
-    static SafeStopwatch LastBlockWatch("LastBlockOfBiCGSTAB");
-    SafeStopwatch::tag LastBlockTag = LastBlockWatch.Start();
+    // Now need to finish multiplying by A, accounting for the other terms.
+    SafeStopwatch::tag DoRestOfMulTag = DoRestOfMulWatch.Start();
+    DoRestOfMultiplication(event.fprecon_tmp, T, event);
+    DoRestOfMulWatch.Stop(DoRestOfMulTag);
+
+    // Finish preconditioner.
+    SafeStopwatch::tag DoPreconTag = DoPreconWatch.Start();
+    DoInvLPrecon(T, event);
+    DoPreconWatch.Stop(DoPreconTag);
 
     // Compute omega.
-    static SafeStopwatch OmegaWatch("Omega");
-    SafeStopwatch::tag OmegaTag = OmegaWatch.Start();
     double rdott = 0;
     double tdott = 0;
     for(size_t i = 0; i < T.size(); i++) {
@@ -1092,10 +1112,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       tdott += T[i]*T[i];
     }
     double omega = rdott/tdott;
-    OmegaWatch.Stop(OmegaTag);
+
     // Modify X and R.
-    static SafeStopwatch UpdateXRWatch("UpdateXR");
-    SafeStopwatch::tag UpdateXRTag = UpdateXRWatch.Start();
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 event.fColumnLength, event.fNumSignals, event.fNumSignals,
                 1, &event.fP[0], event.fColumnLength, &event.fAlpha[0], event.fNumSignals,
@@ -1105,9 +1123,15 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       event.fX[i] += omega*event.fR[i];
       event.fR[i] -= omega*T[i];
     }
-    UpdateXRWatch.Stop(UpdateXRTag);
+
     // Check if we should conclude here.
-    if(CanTerminate(event)) return true;
+    {
+      SafeStopwatch::tag CanTerminateTag = CanTerminateWatch.Start();
+      bool CanTerminateRet = CanTerminate(event);
+      CanTerminateWatch.Stop(CanTerminateTag);
+      if(CanTerminateRet) return true;
+    }
+
     // We permit a maximum of 2000 iterations before we give up.
     if(event.fNumIterations >= 2000) {
       event.fX.clear();
@@ -1121,9 +1145,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
         return false;
       }
     }
+
     // Now compute beta, solving R0hat_V beta = -R0hat_T
-    static SafeStopwatch FindBetaWatch("FindBeta");
-    SafeStopwatch::tag FindBetaTag = FindBetaWatch.Start();
     std::vector<double> Beta(event.fNumSignals*event.fNumSignals, 0);
     cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
                 event.fNumSignals, event.fNumSignals, event.fColumnLength,
@@ -1139,10 +1162,8 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                  " with ret = "<<ret<<std::endl;
       std::exit(1);
     }
-    FindBetaWatch.Stop(FindBetaTag);
+
     // Update P.  Overwrite T for temporary work.
-    static SafeStopwatch UpdatePWatch("UpdateP");
-    SafeStopwatch::tag UpdatePTag = UpdatePWatch.Start();
     T = event.fR;
     for(size_t i = 0; i < event.fP.size(); i++) event.fP[i] -= omega*event.fV[i];
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
@@ -1150,20 +1171,20 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
                 1, &event.fP[0], event.fColumnLength, &Beta[0], event.fNumSignals,
                 1, &T[0], event.fColumnLength);
     std::swap(T, event.fP);
-    UpdatePWatch.Stop(UpdatePTag);
+
     // Clear vectors in event which are no longer needed -- this helps us keep track of where we are.
-    static SafeStopwatch ClearVecsAtEndWatch("ClearVecsAtEnd");
-    SafeStopwatch::tag ClearVecsAtEndTag = ClearVecsAtEndWatch.Start();
     event.fV.clear();
     event.fAlpha.clear();
     event.fR0hat_V_factors.clear();
     event.fR0hat_V_pivot.clear();
     // And request AP.  Remember preconditioner.
     event.fprecon_tmp = event.fP;
-    ClearVecsAtEndWatch.Stop(ClearVecsAtEndTag);
-    LastBlockWatch.Stop(LastBlockTag);
+    DoPreconTag = DoPreconWatch.Start();
     DoInvRPrecon(event.fprecon_tmp, event);
+    DoPreconWatch.Stop(DoPreconTag);
+    SafeStopwatch::tag RequestNoiseMulTag = RequestNoiseMulWatch.Start();
     event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
+    RequestNoiseMulWatch.Stop(RequestNoiseMulTag);
     return false;
   }
 }
@@ -1174,11 +1195,8 @@ void EXORefitSignals::DoRestOfMultiplication(const std::vector<double>& in,
 {
   // After noise terms have already been handled, deal with all of the others.
   // This should not be the bottleneck.
-  static SafeStopwatch DoRestOfMulWatch("DoRestOfMultiplication");
-  SafeStopwatch::tag DoRestOfMulTag = DoRestOfMulWatch.Start();
   DoPoissonMultiplication(in, out, event);
   DoLagrangeAndConstraintMul<'A', true>(in, out, event);
-  DoRestOfMulWatch.Stop(DoRestOfMulTag);
 }
 
 void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
@@ -1227,8 +1245,6 @@ void EXORefitSignals::DoNoiseMultiplication()
   fNoiseMulResult.assign(fNoiseMulQueue.size(), 0); // Probably don't need to fill with 0.
 
   // Do the multiplication -- one call for every frequency.
-  static SafeStopwatch NoiseMulWatch("DoNoiseMultiplication");
-  SafeStopwatch::tag NoiseMulTag = NoiseMulWatch.Start(); // Don't count vector allocation.
   if(fVerbose) std::cout<<"Starting DoNoiseMultiplication."<<std::endl;
 #ifdef USE_THREADS
   boost::thread_group threads;
@@ -1262,7 +1278,6 @@ void EXORefitSignals::DoNoiseMultiplication()
   // The sequential version.
   DoNoiseMultiplication_Range(0, (fMaxF-fMinF+1)); // to handle [0, fMaxF-fMinF], inclusive.
 #endif
-  NoiseMulWatch.Stop(NoiseMulTag);
   if(fVerbose) std::cout<<"Done with DoNoiseMultiplication."<<std::endl;
 
   // Clean up, to be ready for the next call.
@@ -1276,28 +1291,28 @@ void EXORefitSignals::DoNoiseMultiplication_Range(size_t flo, size_t fhi)
   // In case we are parallelizing the noise multiplication, this lets us
   // break up DoNoiseMultiplication into pieces easily.
   // (If we are not parallelizing, the penalty is probably zero.)
-  static SafeStopwatch NoiseMulRangeWatch("DoNoiseMultiplication_Range");
-  SafeStopwatch::tag NoiseMulRangeTag = NoiseMulRangeWatch.Start(); // Don't count vector allocation.
   assert(fNoiseMulQueue.size() == fNoiseColumnLength*fNumVectorsInQueue);
   assert(fNoiseMulResult.size() == fNoiseColumnLength*fNumVectorsInQueue);
   assert(fNoiseCorrelations.size() >= fhi);
+
   for(size_t f = flo; f < fhi; f++) {
     size_t StartIndex = 2*fChannels.size()*f;
     size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
     assert(fNoiseCorrelations[f].size() == BlockSize*BlockSize);
+
+    static SafeStopwatch NoiseMulRangeWatch("DoNoiseMultiplication_Range (threaded)");
+    SafeStopwatch::tag NoiseMulRangeTag = NoiseMulRangeWatch.Start(); // Don't count vector allocation.
     cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
                 BlockSize, fNumVectorsInQueue, BlockSize,
                 1, &fNoiseCorrelations[f][0], BlockSize, &fNoiseMulQueue[StartIndex], fNoiseColumnLength,
                 0, &fNoiseMulResult[StartIndex], fNoiseColumnLength);
+    NoiseMulRangeWatch.Stop(NoiseMulRangeTag);
   }
-  NoiseMulRangeWatch.Stop(NoiseMulRangeTag);
 }
 
 void EXORefitSignals::DoInvLPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K1_inv in-place.
-  static SafeStopwatch DoInvLPreconWatch("DoInvLPrecon");
-  SafeStopwatch::tag DoInvLPreconTag = DoInvLPreconWatch.Start();
   mkl_dimatcopy('C', 'N', event.fNumSignals, event.fNumSignals,
                 -1, &in[fNoiseColumnLength], event.fColumnLength, event.fColumnLength); // in = {{v1} {-v2}}
   DoLagrangeAndConstraintMul<'C', true>(in, in, event); // in = {{v1} {trans(L)D^(-1/2)v1 - v2}}
@@ -1306,46 +1321,36 @@ void EXORefitSignals::DoInvLPrecon(std::vector<double>& in, EventHandler& event)
               1, &event.fPreconX[0], event.fNumSignals,
               &in[fNoiseColumnLength], event.fColumnLength);
   // in = {{v1} {Inv(trans(X))(trans(L)D^(-1)v1 - v2)}}.
-  DoInvLPreconWatch.Stop(DoInvLPreconTag);
 }
 
 void EXORefitSignals::DoInvRPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K2_inv in-place.
-  static SafeStopwatch DoInvRPreconWatch("DoInvRPrecon");
-  SafeStopwatch::tag DoInvRPreconTag = DoInvRPreconWatch.Start();
   cblas_dtrsm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
               event.fNumSignals, event.fNumSignals,
               1, &event.fPreconX[0], event.fNumSignals,
               &in[fNoiseColumnLength], event.fColumnLength); // in = {{v1} {X^(-1)v2}}
   DoLagrangeAndConstraintMul<'L', false>(in, in, event); // in = {{v1 - D^(-1/2)LX^(-1)v2} {X^(-1)v2}}
-  DoInvRPreconWatch.Stop(DoInvRPreconTag);
 }
 
 void EXORefitSignals::DoLPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K1 in-place.
-  static SafeStopwatch DoLPreconWatch("DoLPrecon");
-  SafeStopwatch::tag DoLPreconTag = DoLPreconWatch.Start();
   cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasTrans, CblasNonUnit,
               event.fNumSignals, event.fNumSignals,
               -1, &event.fPreconX[0], event.fNumSignals,
               &in[fNoiseColumnLength], event.fColumnLength); // in = {{v1} {-trans(X)v2}}
   DoLagrangeAndConstraintMul<'C', true>(in, in, event); // in = {{v1} {trans(L)D^(-1/2)v1 - trans(X)v2}}
-  DoLPreconWatch.Stop(DoLPreconTag);
 }
 
 void EXORefitSignals::DoRPrecon(std::vector<double>& in, EventHandler& event)
 {
   // Multiply by K2 in-place.
-  static SafeStopwatch DoRPreconWatch("DoRPrecon");
-  SafeStopwatch::tag DoRPreconTag = DoRPreconWatch.Start();
   DoLagrangeAndConstraintMul<'L', true>(in, in, event); // out = {{v1 + D^(-1/2)Lv2} {v2}}
   cblas_dtrmm(CblasColMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit,
               event.fNumSignals, event.fNumSignals,
               1, &event.fPreconX[0], event.fNumSignals,
               &in[fNoiseColumnLength], event.fColumnLength); // out = {{v1 + D^(-1/2)Lv2} {Xv2}}
-  DoRPreconWatch.Stop(DoRPreconTag);
 }
 
 size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
@@ -1353,8 +1358,6 @@ size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
 {
   // Request a noise multiplication on vec.
   // Return value indicates where to retrieve results.
-  static SafeStopwatch RequestNoiseMulWatch("RequestNoiseMul");
-  SafeStopwatch::tag RequestNoiseMulTag = RequestNoiseMulWatch.Start();
   assert(fNoiseColumnLength <= ColLength);
   assert(vec.size() % ColLength == 0);
   size_t NumCols = vec.size() / ColLength;
@@ -1376,7 +1379,6 @@ size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
 #ifdef USE_THREADS
   RequestNoiseMulMutex.unlock();
 #endif
-  RequestNoiseMulWatch.Stop(RequestNoiseMulTag);
   return InitSize;
 }
 
@@ -1387,8 +1389,6 @@ void EXORefitSignals::FillFromNoise(std::vector<double>& vec,
 {
   // Overwrite in with the results from noise multiplication.
   // Leave zeros for rows which are not subject to noise multiplication terms.
-  static SafeStopwatch FillFromNoiseWatch("FillFromNoise");
-  SafeStopwatch::tag FillFromNoiseTag = FillFromNoiseWatch.Start();
   assert(fNoiseColumnLength <= ColLength);
   assert(ResultIndex % fNoiseColumnLength == 0);
   assert(ResultIndex + NumCols*fNoiseColumnLength <= fNoiseMulResult.size());
@@ -1399,7 +1399,6 @@ void EXORefitSignals::FillFromNoise(std::vector<double>& vec,
               fNoiseMulResult.begin() + ResultIndex + (i+1)*fNoiseColumnLength,
               vec.begin() + i*ColLength);
   }
-  FillFromNoiseWatch.Stop(FillFromNoiseTag);
 }
 
 EventHandler* EXORefitSignals::PopAnEvent()
@@ -1446,34 +1445,44 @@ void EXORefitSignals::PushAnEvent(EventHandler* evt)
 void EXORefitSignals::HandleEventsInThread()
 {
   // Function for a thread to keep grabbing events to handle until no more exist.
-  static SafeStopwatch HandleEventsInThreadWatch("HandleEventsInThread");
-  SafeStopwatch::tag HandleEventsInThreadTag = HandleEventsInThreadWatch.Start();
+  static SafeStopwatch HandleEventsWatch("HandleEvents (threaded)");
+  SafeStopwatch::tag HandleEventsTag = HandleEventsWatch.Start();
   EventHandler* evt = NULL;
   while(evt = PopAnEvent()) {
     // We just drew an event pointer from the queue; handle it.
-    static SafeStopwatch DoBlBiCGSTABWatch("DoBlBiCGSTAB");
+    static SafeStopwatch DoBlBiCGSTABWatch("DoBlBiCGSTAB (threaded)");
     SafeStopwatch::tag DoBlBiCGSTABTag = DoBlBiCGSTABWatch.Start();
     bool Result = DoBlBiCGSTAB(*evt);
     DoBlBiCGSTABWatch.Stop(DoBlBiCGSTABTag);
     if(Result) {
       // This event is done.
+      static SafeStopwatch FinishEventWatch("FinishEvent (threaded)");
+      SafeStopwatch::tag FinishEventTag = FinishEventWatch.Start();
       FinishEvent(evt); // Deletes the EventHandler object.
+      FinishEventWatch.Stop(FinishEventTag);
     }
     else {
       // This event is not done, so it must have requested a noise multiplication.
       PushAnEvent(evt);
     }
   }
-  HandleEventsInThreadWatch.Stop(HandleEventsInThreadTag);
+  HandleEventsWatch.Stop(HandleEventsTag);
 }
 
 void EXORefitSignals::DoPassThroughEvents()
 {
   // Do a pass through the event handlers we've accumulated;
   // do a round of noise multiplication followed by a round of BiCGSTAB.
+  static SafeStopwatch DoPassWatch("DoPassThroughEvents (sequential)");
+  SafeStopwatch::tag DoPassTag = DoPassWatch.Start();
+
+  static SafeStopwatch NoiseMulWatch("Noise multiplication (sequential)");
+  SafeStopwatch::tag NoiseMulTag = NoiseMulWatch.Start();
   DoNoiseMultiplication();
   assert(fEventHandlerResults.empty());
-  static SafeStopwatch HandleEventsWatch("HandleEvents");
+  NoiseMulWatch.Stop(NoiseMulTag);
+
+  static SafeStopwatch HandleEventsWatch("HandleEvents (sequential)");
   SafeStopwatch::tag HandleEventsTag = HandleEventsWatch.Start();
   if(fVerbose) std::cout<<"Starting HandleEvents."<<std::endl;
 #ifdef USE_THREADS
@@ -1488,9 +1497,9 @@ void EXORefitSignals::DoPassThroughEvents()
 #ifdef USE_THREADS
   threads.join_all();
 #endif
-  HandleEventsWatch.Stop(HandleEventsTag);
-  if(fVerbose) std::cout<<"Done with HandleEvents."<<std::endl;
   assert(fEventHandlerQueue.empty());
+  if(fVerbose) std::cout<<"Done with HandleEvents."<<std::endl;
+  HandleEventsWatch.Stop(HandleEventsTag);
 
   // Transfer entries from results into queue.
   while(not fEventHandlerResults.empty()) {
@@ -1503,6 +1512,8 @@ void EXORefitSignals::DoPassThroughEvents()
     fEventHandlerResults.pop();
 #endif
   }
+
+  DoPassWatch.Stop(DoPassTag);
 }
 
 bool EXORefitSignals::CanTerminate(EventHandler& event)
@@ -1511,8 +1522,6 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
   // For now we test for termination against the *unpreconditioned* residual matrix.
   // This should be compared to the alternative of terminating against the preconditioned residual matrix.
   // Permit early return if we're not in verbose mode; if we are, finish to collect all possible information.
-  static SafeStopwatch CanTerminateWatch("CanTerminate");
-  SafeStopwatch::tag CanTerminateTag = CanTerminateWatch.Start();
   event.fNumIterations++; // Iterations = number of times we've tried to terminate.
   event.fNumIterSinceReset++;
   std::vector<double> R_unprec = event.fR;
@@ -1530,10 +1539,7 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
       Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i];
     }
     if(fVerbose) WorstNorm = std::max(Norm, WorstNorm);
-    else if(Norm > fRThreshold*fRThreshold) {
-      CanTerminateWatch.Stop(CanTerminateTag);
-      return false;
-    }
+    else if(Norm > fRThreshold*fRThreshold) return false;
   }
 
   if(fVerbose) {
@@ -1546,7 +1552,6 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
 #endif
     if(WorstNorm > fRThreshold*fRThreshold) return false;
   }
-  CanTerminateWatch.Stop(CanTerminateTag);
   return true;
 }
 

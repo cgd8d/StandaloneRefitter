@@ -61,7 +61,7 @@ int main(int argc, char** argv)
   static mpi_handler mpi(argc, argv);
 #endif
   std::cout<<"Entered program."<<std::endl;
-  SafeStopwatch WholeProgramWatch("Whole program");
+  static SafeStopwatch WholeProgramWatch("Whole program (sequential)");
   SafeStopwatch::tag WholeProgramTag = WholeProgramWatch.Start();
   std::string ProcessedFileName;
   std::string RawFileName;
@@ -132,10 +132,16 @@ int main(int argc, char** argv)
     if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
     EXOEventData* ED = InputModule.GetEvent(entryNum);
     if(ED == NULL) break;
+    static SafeStopwatch AcceptEventWatch("AcceptEvent (sequential)");
+    SafeStopwatch::tag AcceptEventTag = AcceptEventWatch.Start();
     RefitSig.AcceptEvent(ED, entryNum);
+    AcceptEventWatch.Stop(AcceptEventTag);
   }
 
+  static SafeStopwatch FlushEventsWatch("FlushEvents (sequential)");
+  SafeStopwatch::tag FlushEventsTag = FlushEventsWatch.Start();
   RefitSig.FlushEvents();
+  FlushEventsWatch.Stop(FlushEventsTag);
   OutputModule.ShutDown();
   WholeProgramWatch.Stop(WholeProgramTag);
 }
