@@ -31,6 +31,7 @@ if __name__ == '__main__':
     if ROOT.gSystem.Load("/nfs/slac/g/exo_data4/users/cgd8d/rhel5-64/EXO_Fitting/EXO_Fitting/lib/libEXOFitting") < 0: sys.exit('Failed to load EXOFitting.')
     EventTree = ROOT.TChain('tree')
     EventTree.Add(sys.argv[1])
+    import glob
     AllMaskedFiles = glob.glob(sys.argv[1])
     print "Using files:", AllMaskedFiles
     AllMaskedFiles.sort(reverse = True)

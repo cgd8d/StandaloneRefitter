@@ -5,7 +5,7 @@ use tinput wiregain cluster gridcorr lifecalib toutput
 /input/file ${INPUT_LOCATION}/${FILENAME}
 /wiregain/UWireDBFlavor pp_sourcecal_ci_timevar_2a
 /cluster/ignore_induction true
-/cluster/KeepScint true
+/cluster/SetKeepScint true
 /gridcorr/gridcorrDBFlavor linear_expcorrections
 /lifecalib/flavor separateTPCs
 /toutput/file ${OUTPUT_LOCATION}/${FILENAME}
