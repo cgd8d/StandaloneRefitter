@@ -12,11 +12,11 @@ RunWindows = [(2464, 2699),
               (2700, 2852), # Ebox 1 fan installed
               (2853, 2891), # Ebox 2 fan installed
               (2892, 3117), # Power outage here.
-              (3118, 3329),
-              (3330, 3699),
-              (3700, 3949),
-              (3950, 4149),
-              (4150, 4579),
+              (3118, 3326), # APD board swap
+              (3327, 3700), # Utility power swap
+              (3701, 3949),
+              (3950, 4140), # Ralph's diode box installed
+              (4141, 4579),
               (4580, 4779),
               (4780, 5197), # LC filters removed from FECs
               (5198, 5367)] # Run 2b ends
