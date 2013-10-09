@@ -11,6 +11,7 @@ else
 	# Running at NERSC
 	export CXX='CC -dynamic -std=c++11 -pthread'
 	export EXO_LIBS="-Wl,-u,gEXOCalibBuilder_EXOElectronicsShapersHandler -Wl,-u,gEXOCalibBuilder_EXOUWireGainsHandler -Wl,-u,gEXOCalibBuilder_EXOChannelMapHandler -lEXOAnalysis -lfftw3 -lmysqlclient"
+	export MPI_MACROS="-DUSE_MPI"
 	if [ "$NERSC_HOST" = "hopper" ]; then
 		export LOCATION=HOPPER
 		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6 -DUSE_LOCKFREE"
@@ -24,7 +25,7 @@ else
 fi
 
 $CXX -O3 \
--DHAVE_TYPE_TRAITS=1 -D$LOCATION $THREAD_MACROS \
+-DHAVE_TYPE_TRAITS=1 -D$LOCATION $THREAD_MACROS $MPI_MACROS \
 `root-config --cflags` -I`exo-config --incdir` -L`root-config --libdir` -L`exo-config --libdir` \
 -I$MKL_INC -L$MKL_LIBDIR -L$FFTW_DIR \
 `mysql_config --libs | sed 's:\ :\n:g' | grep '\-L'` \

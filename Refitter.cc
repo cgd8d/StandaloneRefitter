@@ -23,7 +23,7 @@ Should be called like:
 #include "TTree.h"
 #include <iostream>
 
-#ifdef USE_THREADS
+#ifdef USE_MPI
 #include <fstream>
 #include <iomanip>
 #include <mpi.h>
@@ -56,7 +56,7 @@ struct mpi_handler
 
 int main(int argc, char** argv)
 {
-#ifdef USE_THREADS
+#ifdef USE_MPI
   // This should be the very first thing created, and the very last destroyed (as nearly as possible).
   static mpi_handler mpi(argc, argv);
 #endif
@@ -70,7 +70,7 @@ int main(int argc, char** argv)
   Long64_t NumEntries = 100;
   double Threshold = 10;
 
-#ifdef USE_THREADS
+#ifdef USE_MPI
   std::ifstream OptionFile(std::string(argv[1]) + "/infile" + mpi.RankString);
   OptionFile >> ProcessedFileName
              >> RawFileName
