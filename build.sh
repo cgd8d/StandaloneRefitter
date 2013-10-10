@@ -28,7 +28,7 @@ $CXX -O3 \
 -DHAVE_TYPE_TRAITS=1 -D$LOCATION $THREAD_MACROS $MPI_MACROS \
 `root-config --cflags` -I`exo-config --incdir` -L`root-config --libdir` -L`exo-config --libdir` \
 -I$MKL_INC -L$MKL_LIBDIR -L$FFTW_DIR \
-`mysql_config --libs | sed 's:\ :\n:g' | grep '\-L'` \
+`mysql_config --libs | sed 's:\ :\n:g' | grep '\-L' | grep mysql` \
 -I$BOOST_DIR/include -L$BOOST_LIB \
 -o Refitter Refitter.cc EXORefitSignals.cc SafeStopwatch.cc \
 -Wl,-Bstatic \
