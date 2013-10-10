@@ -4,12 +4,14 @@
 
 if [ -z "$NERSC_HOST" ]; then
 	# Running at SLAC.
-	export CXX=g++
+	export CXX='g++ -pthread'
 	export EXO_LIBS="-lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities"
+	export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=4 -DUSE_LOCKFREE"
+	export FFTW_DIR=`root-config --libdir`
 else
 	# Running at NERSC
 	export CXX='CC -dynamic -std=c++11 -pthread'
-	export EXO_LIBS="-Wl,-u,gEXOCalibBuilder_EXOElectronicsShapersHandler -Wl,-u,gEXOCalibBuilder_EXOUWireGainsHandler -Wl,-u,gEXOCalibBuilder_EXOChannelMapHandler -lEXOAnalysis -lfftw3 -lmysqlclient"
+	export EXO_LIBS="-Wl,-Bstatic -Wl,-u,gEXOCalibBuilder_EXOElectronicsShapersHandler -Wl,-u,gEXOCalibBuilder_EXOUWireGainsHandler -Wl,-u,gEXOCalibBuilder_EXOChannelMapHandler -lEXOAnalysis -lfftw3 -lmysqlclient -Wl,-Bdynamic"
 	export MPI_MACROS="-DUSE_MPI"
 	if [ "$NERSC_HOST" = "hopper" ]; then
 		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6 -DUSE_LOCKFREE"
@@ -28,8 +30,8 @@ $CXX -O3 \
 `mysql_config --libs | sed 's:\ :\n:g' | grep '\-L' | grep mysql` \
 -I$BOOST_DIR/include -L$BOOST_LIB \
 -o Refitter Refitter.cc EXORefitSignals.cc SafeStopwatch.cc \
--Wl,-Bstatic \
 $EXO_LIBS \
+-Wl,-Bstatic \
 -lboost_thread -lboost_atomic -lboost_timer -lboost_chrono -lboost_system \
 -Wl,--start-group -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -Wl,--end-group \
 -Wl,-Bdynamic \
