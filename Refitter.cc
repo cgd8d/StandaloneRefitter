@@ -66,6 +66,7 @@ int main(int argc, char** argv)
   std::string ProcessedFileName;
   std::string RawFileName;
   std::string OutFileName;
+  std::string NoiseFileName;
   Long64_t StartEntry = 0;
   Long64_t NumEntries = 100;
   double Threshold = 10;
@@ -75,6 +76,7 @@ int main(int argc, char** argv)
   OptionFile >> ProcessedFileName
              >> RawFileName
              >> OutFileName
+             >> NoiseFileName
              >> StartEntry
              >> NumEntries
              >> Threshold;
@@ -83,14 +85,16 @@ int main(int argc, char** argv)
   ProcessedFileName = argv[1];
   RawFileName = argv[2];
   OutFileName = argv[3];
-  if(argc >= 5) StartEntry = std::atol(argv[4]);
-  if(argc >= 6) NumEntries = std::atol(argv[5]);
-  if(argc >= 7) Threshold = std::atof(argv[6]);
+  NoiseFileName = argv[4];
+  if(argc >= 6) StartEntry = std::atol(argv[5]);
+  if(argc >= 7) NumEntries = std::atol(argv[6]);
+  if(argc >= 8) Threshold = std::atof(argv[7]);
 #endif
 
   std::cout<<"Input processed file: "<<ProcessedFileName<<std::endl;
   std::cout<<"Input raw file: "<<RawFileName<<std::endl;
   std::cout<<"Output file: "<<OutFileName<<std::endl;
+  std::cout<<"Noise file: "<<NoiseFileName<<std::endl;
   std::cout<<"Starting at entry "<<StartEntry<<std::endl;
   std::cout<<"Handle "<<NumEntries<<" entries."<<std::endl;
 
@@ -108,13 +112,7 @@ int main(int argc, char** argv)
 
   EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
   EXOCalibManager::GetCalibManager().SetMetadataAccessType("text");
-#if defined HOPPER
-  RefitSig.SetNoiseFilename("/scratch2/scratchdirs/claytond/noise_manyruns_withuwires_100000.dat");
-#elif defined EDISON
-  RefitSig.SetNoiseFilename("/scratch1/scratchdirs/claytond/noise_manyruns_withuwires_100000.dat");
-#elif defined SLAC
-  RefitSig.SetNoiseFilename("/nfs/slac/g/exo_data4/users/cgd8d/rhel5-64/noise_manyruns_withuwires_100000.dat");
-#endif
+  RefitSig.SetNoiseFilename(NoiseFileName);
   RefitSig.SetRThreshold(Threshold);
   RefitSig.fVerbose = true;
   RefitSig.Initialize();
