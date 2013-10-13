@@ -2,7 +2,7 @@
 import glob, os
 
 InOutDir = "/scratch1/scratchdirs/claytond/LightOnly/InOutFiles"
-DenoisedOutDir = "/scratch1/scratchdirs/claytond/LightOnly
+DenoisedOutDir = "/scratch1/scratchdirs/claytond/LightOnly"
 
 NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles"
 RunWindows = [(2464, 2699), (2700, 2852), (2853, 2891), (2892, 3117), (3118, 3329), (3330, 3699),
@@ -35,7 +35,7 @@ for rawFile in rawFiles:
             break
 
 # Sort by size of processed file; this helps us pair short file segments together, which will finish faster.
-RawProcNoiseGroup.sort(key = lambda x: os.path.getsize(x[1]))
+RawProcNoiseGroups.sort(key = lambda x: os.path.getsize(x[1]))
 
 NodeNum = -1
 while len(RawProcNoiseGroups) > 0:
