@@ -20,6 +20,7 @@ Should be called like:
 #include "EXOAnalysisManager/EXOTreeInputModule.hh"
 #include "EXOAnalysisManager/EXOTreeOutputModule.hh"
 #include "TFile.h"
+#include "TXNetFile.h"
 #include "TTree.h"
 #include <iostream>
 
@@ -107,7 +108,7 @@ int main(int argc, char** argv)
   std::cout<<"About to set filename."<<std::endl;
   InputModule.SetFilename(ProcessedFileName);
   std::cout<<"Successfully set filename."<<std::endl;
-  TFile WaveformFile(RawFileName.c_str());
+  TXNetFile WaveformFile(RawFileName.c_str());
   TTree* WaveformTree = dynamic_cast<TTree*>(WaveformFile.Get("tree"));
 
   EXOTreeOutputModule OutputModule;
