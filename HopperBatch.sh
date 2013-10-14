@@ -7,5 +7,21 @@
 
 export CRAY_ROOTFS=DSL
 cd $SCRATCH2
-cp $HOME/hopper/Refitter/Refitter .
-aprun -n 4 -S 1 -d 6 -ss -cc numa_node ./Refitter $SCRATCH2/InOutFiles
+
+echo "For a check, are there any already-running instances of socat?"
+ps -Af | grep socat
+
+SOCAT_PORT=`$PBS_O_WORKDIR/GetSocatPort.sh`
+/project/projectdirs/exo200/exo_out/bin/socat TCP4-LISTEN:$SOCAT_PORT,fork TCP4:scalnx-v02.slac.stanford.edu:3967 &
+socatpid=$!
+echo "We will communicate through $HOST:$SOCAT_PORT; socat has pid $socatpid."
+
+aprun -n 4 -S 1 -d 6 -ss -cc numa_node $PBS_O_WORKDIR/Refitter $SCRATCH2/LightOnly/InOutFiles $HOST:$SOCAT_PORT &
+pid=$!
+
+trap "echo 'user requested termination'; kill -USR1 $pid" USR1
+trap "echo 'term'" TERM
+wait $pid
+kill $socatpid
+wait $socatpid
+echo "Killed socat."

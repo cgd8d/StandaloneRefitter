@@ -36,7 +36,7 @@ struct mpi_handler
   std::string RankString;
   std::ofstream Output;
   mpi_handler(int argc, char** argv) {
-    assert(argc == 2);
+    assert(argc >= 2);
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     std::ostringstream ProcessRankString;
@@ -80,6 +80,11 @@ int main(int argc, char** argv)
              >> StartEntry
              >> NumEntries
              >> Threshold;
+  // On NERSC, we always use xrootd.  Need the IP address of the MOM node.
+  assert(argc == 3);
+  std::string mom_ip = argv[2]; // Should also include port number used.
+  ProcessedFileName = "root://cgd8d@" + mom_ip + "/" + ProcessedFileName;
+  RawFileName = "root://cgd8d@" + mom_ip + "/" + RawFileName;
 #else
   assert(argc >= 4);
   ProcessedFileName = argv[1];
