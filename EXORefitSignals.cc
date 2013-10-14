@@ -855,10 +855,18 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   // Compute and fill denoised signals, as appropriate.
   // Then pass the filled event to the output module.
 #ifdef USE_THREADS
+  static SafeStopwatch FinishEventGetLockWatch("FinishEvent::GetLock (threaded, mostly)");
+  SafeStopwatch::tag FinishEventGetLockTag = FinishEventGetLockWatch.Start();
   FinishEventMutex.lock(); // Wait until we get a lock.
+  FinishEventGetLockWatch.Stop(FinishEventGetLockTag);
 #endif
+  static SafeStopwatch FinishEventInLockWatch("FinishEvent::AllInsideLock (threaded, mostly)");
+  SafeStopwatch::tag FinishEventInLockTag = FinishEventInLockWatch.Start();
   if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
+  static SafeStopwatch GetProcWatch("FinishEvent::GetProcessedEntry (threaded, mostly)");
+  SafeStopwatch::tag GetProcTag = GetProcWatch.Start();
   EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
+  GetProcWatch.Stop(GetProcTag);
 
   // We need to clear out the denoised information here, since we just freshly read the event from file.
   for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
@@ -885,7 +893,10 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     }
 
     // We need to compute denoised signals.
+    static SafeStopwatch GetRawWatch("FinishEvent::GetRawEntry (threaded, mostly)");
+    SafeStopwatch::tag GetRawTag = GetRawWatch.Start();
     fWFTree.GetEntryWithIndex(ED->fRunNumber, ED->fEventNumber);
+    GetRawWatch.Stop(GetRawTag);
     fWFEvent->GetWaveformData()->Decompress();
 
     // Collect the fourier-transformed waveforms.  Save them split into real and complex parts.
@@ -944,8 +955,12 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
   } // End setting of denoised energy signals.
 
+  static SafeStopwatch WriteProcWatch("FinishEvent::WriteProcEntry (threaded, mostly)");
+  SafeStopwatch::tag WriteProcTag = WriteProcWatch.Start();
   fOutputModule.ProcessEvent(ED);
+  WriteProcWatch.Stop(WriteProcTag);
   if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
+  FinishEventInLockWatch.Stop(FinishEventInLockTag);
 #ifdef USE_THREADS
   FinishEventMutex.unlock(); // Release access to tinput and toutput for other threads.
 #endif
