@@ -564,6 +564,8 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   SafeStopwatch::tag BeginAcceptEventTag = BeginAcceptEventWatch.Start();
   EventHandler* event = new EventHandler;
   event->fEntryNumber = entryNum;
+  event->fRunNumber = ED->fRunNumber;
+  event->fEventNumber = ED->fEventNumber;
   event->fNumIterations = 0;
   event->fNumIterSinceReset = 0;
   event->fNumSignals = 0;
@@ -863,26 +865,8 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   static SafeStopwatch FinishEventInLockWatch("FinishEvent::AllInsideLock (threaded, mostly)");
   SafeStopwatch::tag FinishEventInLockTag = FinishEventInLockWatch.Start();
   if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
-  static SafeStopwatch GetProcWatch("FinishEvent::GetProcessedEntry (threaded, mostly)");
-  SafeStopwatch::tag GetProcTag = GetProcWatch.Start();
-  EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
-  GetProcWatch.Stop(GetProcTag);
 
-  // We need to clear out the denoised information here, since we just freshly read the event from file.
-  for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
-    ED->GetScintillationCluster(i)->fEnergy = ED->GetScintillationCluster(i)->fRawEnergy;
-    ED->GetScintillationCluster(i)->fRawEnergy = 0;
-    ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
-  }
-#ifdef ENABLE_CHARGE
-  for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
-    ED->GetUWireSignal(i)->fDenoisedEnergy = 0;
-  }
-  for(size_t i = 0; i < ED->GetNumChargeClusters(); i++) {
-    ED->GetChargeCluster(i)->fDenoisedEnergy = 0;
-  }
-#endif
-
+  std::vector<double> Results;
   if(not event->fX.empty()) {
     if(fVerbose) std::cout<<"\tThis entry has denoised results to compute."<<std::endl;
     // Undo preconditioning of X.
@@ -891,11 +875,12 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
       size_t imod = i % event->fColumnLength;
       if(imod < fNoiseColumnLength) event->fX[i] *= fInvSqrtNoiseDiag[imod];
     }
+    Results.assign(event->fNumSignals, 0);
 
     // We need to compute denoised signals.
     static SafeStopwatch GetRawWatch("FinishEvent::GetRawEntry (threaded, mostly)");
     SafeStopwatch::tag GetRawTag = GetRawWatch.Start();
-    fWFTree.GetEntryWithIndex(ED->fRunNumber, ED->fEventNumber);
+    fWFTree.GetEntryWithIndex(event->fRunNumber, event->fEventNumber);
     GetRawWatch.Stop(GetRawTag);
     fWFEvent->GetWaveformData()->Decompress();
 
@@ -924,7 +909,6 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     }
 
     // Produce estimates of the signals.
-    std::vector<double> Results(event->fNumSignals, 0);
     for(size_t i = 0; i < Results.size(); i++) {
       for(size_t f = 0; f <= fMaxF-fMinF; f++) {
         for(size_t chan_index = 0; chan_index < fChannels.size(); chan_index++) {
@@ -938,7 +922,29 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
         }
       }
     }
+  } // End setting of denoised energy signals.
 
+  static SafeStopwatch GetProcWatch("FinishEvent::GetProcessedEntry (threaded, mostly)");
+  SafeStopwatch::tag GetProcTag = GetProcWatch.Start();
+  EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
+  GetProcWatch.Stop(GetProcTag);
+
+  // We need to clear out the denoised information here, since we just freshly read the event from file.
+  for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
+    ED->GetScintillationCluster(i)->fEnergy = ED->GetScintillationCluster(i)->fRawEnergy;
+    ED->GetScintillationCluster(i)->fRawEnergy = 0;
+    ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
+  }
+#ifdef ENABLE_CHARGE
+  for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
+    ED->GetUWireSignal(i)->fDenoisedEnergy = 0;
+  }
+  for(size_t i = 0; i < ED->GetNumChargeClusters(); i++) {
+    ED->GetChargeCluster(i)->fDenoisedEnergy = 0;
+  }
+#endif
+
+  if(not Results.empty()) {
     // Translate signal magnitudes into corresponding objects.
 #ifdef ENABLE_CHARGE
     if(not fAPDsOnly) {
@@ -953,7 +959,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 #endif
     ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
     ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
-  } // End setting of denoised energy signals.
+  }
 
   static SafeStopwatch WriteProcWatch("FinishEvent::WriteProcEntry (threaded, mostly)");
   SafeStopwatch::tag WriteProcTag = WriteProcWatch.Start();

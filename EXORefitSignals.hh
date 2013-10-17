@@ -28,6 +28,8 @@ class EXOTransferFunction;
 struct EventHandler {
   // So we can grab the event again when we're done.
   Long64_t fEntryNumber;
+  Int_t fRunNumber;
+  Int_t fEventNumber;
   double fUnixTimeOfEvent;
   size_t fColumnLength;
   size_t fNumSignals;
