@@ -98,8 +98,7 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
 #endif
   fNumVectorsInQueue(0)
 {
-  fWFEvent = NULL;
-  fWFTree.SetBranchAddress("EventBranch", &fWFEvent);
+  fWFTree.GetBranch("fWaveformData")->SetAddress(&fWFData);
 }
 
 void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
@@ -909,14 +908,15 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 #endif
     static SafeStopwatch GetRawWatch("FinishEvent::GetRawEntry (threaded, mostly)");
     SafeStopwatch::tag GetRawTag = GetRawWatch.Start();
-    fWFTree.GetEntryWithIndex(event->fRunNumber, event->fEventNumber);
+    Long64_t RawEntryNum = fWFTree.GetEntryNumberWithIndex(event->fRunNumber, event->fEventNumber);
+    fWFTree.GetBranch("fWaveformData")->GetEntry(RawEntryNum);
     GetRawWatch.Stop(GetRawTag);
-    fWFEvent->GetWaveformData()->Decompress();
+    fWFData.Decompress();
 
     // Collect the fourier-transformed waveforms.  Save them split into real and complex parts.
     std::vector<EXODoubleWaveform> WF_real, WF_imag;
     for(size_t i = 0; i < fChannels.size(); i++) {
-      const EXOWaveform* wf = fWFEvent->GetWaveformData()->GetWaveformWithChannel(fChannels[i]);
+      const EXOWaveform* wf = fWFData.GetWaveformWithChannel(fChannels[i]);
 
       // Take the Fourier transform.
       EXODoubleWaveform dwf = wf->Convert<Double_t>();

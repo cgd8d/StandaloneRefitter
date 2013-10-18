@@ -2,6 +2,7 @@
 #define EXORefitSignals_hh
 
 #include "SafeStopwatch.hh"
+#include "EXOUtilities/EXOWaveformData.hh"
 #include "Rtypes.h"
 #include "mkl_cblas.h"
 #include "mkl_lapacke.h"
@@ -144,7 +145,7 @@ class EXORefitSignals
   // Handles so that we can read events in and save events as necessary.
   EXOTreeInputModule& fInputModule;
   TTree& fWFTree;
-  EXOEventData* fWFEvent;
+  EXOWaveformData fWFData;
   EXOTreeOutputModule& fOutputModule;
 
   // fNoiseCorrelations[f-fMinF] stores the matrix of noise correlations at frequency f.

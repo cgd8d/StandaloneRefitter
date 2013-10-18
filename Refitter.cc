@@ -116,15 +116,6 @@ int main(int argc, char** argv)
   TXNetFile WaveformFile(RawFileName.c_str());
   TTree* WaveformTree = dynamic_cast<TTree*>(WaveformFile.Get("tree"));
 
-  if(WaveformTree->GetTreeIndex() == NULL) WaveformTree->BuildIndex("fRunNumber", "fEventNumber");
-  UInt_t BranchesFound = 0;
-  WaveformTree->SetBranchStatus("*", 0, &BranchesFound);
-  std::cout<<"Disabled all ("<<BranchesFound<<") branches of the raw-waveform tree."<<std::endl;
-  WaveformTree->SetBranchStatus("EventBranch", 1, &BranchesFound);
-  std::cout<<"In reenabling EventBranch, found "<<BranchesFound<<" branches."<<std::endl;
-  WaveformTree->SetBranchStatus("fWaveformData*", 1, &BranchesFound);
-  std::cout<<"Enabled the "<<BranchesFound<<" branches relevant to reading waveforms."<<std::endl;
-
   EXOTreeOutputModule OutputModule;
   OutputModule.SetOutputFilename(OutFileName);
   OutputModule.Initialize();
