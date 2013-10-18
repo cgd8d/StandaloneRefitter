@@ -24,6 +24,11 @@ Should be called like:
 #include "TTree.h"
 #include <iostream>
 
+#ifdef USE_THREADS
+#include <boost/thread/thread.hpp>
+#include <boost/chrono/duration.hpp>
+#endif
+
 #ifdef USE_MPI
 #include <fstream>
 #include <iomanip>
@@ -141,10 +146,36 @@ int main(int argc, char** argv)
   std::cout<<"Using the boost::lockfree library."<<std::endl;
 #endif
 
+#ifdef USE_THREADS
+  // Start a finish-up thread.
+  boost::thread finishThread(&EXORefitSignals::FinishEventThread, &RefitSig);
+#endif
+
   for(Long64_t entryNum = StartEntry; entryNum < StartEntry + NumEntries; entryNum++) {
     if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
+    if(entryNum % 100 == 0) {
+#ifdef USE_THREADS
+      while(RefitSig.GetFinishEventQueueLength() > 1000) {
+        // If we're getting ahead of FinishEvent, wait a bit for it to catch up.
+        // This is purely a memory concern of how many events we can save on the queue.
+        boost::this_thread::sleep_for(boost::chrono::milliseconds(100));
+      }
+#else
+      RefitSig.FinishEventThread();
+#endif
+    }
+#ifdef USE_THREADS
+    // This is tricky to release, because we can finish with it in so many places.
+    // But it is important to release it as soon as possible, because it blocks FinishEvent.
+    ProcessedFileMutex.lock();
+#endif
     EXOEventData* ED = InputModule.GetEvent(entryNum);
-    if(ED == NULL) break;
+    if(ED == NULL) {
+#ifdef USE_THREADS
+      ProcessedFileMutex.unlock();
+#endif
+      break;
+    }
     static SafeStopwatch AcceptEventWatch("AcceptEvent (sequential)");
     SafeStopwatch::tag AcceptEventTag = AcceptEventWatch.Start();
     RefitSig.AcceptEvent(ED, entryNum);
@@ -155,6 +186,12 @@ int main(int argc, char** argv)
   SafeStopwatch::tag FlushEventsTag = FlushEventsWatch.Start();
   RefitSig.FlushEvents();
   FlushEventsWatch.Stop(FlushEventsTag);
+#ifdef USE_THREADS
+  RefitSig.fProcessingIsDone.store(true, boost::memory_order_seq_cst);
+  finishThread.join();
+#else
+  RefitSig.FinishEventThread();
+#endif
   OutputModule.ShutDown();
   WholeProgramWatch.Stop(WholeProgramTag);
 }

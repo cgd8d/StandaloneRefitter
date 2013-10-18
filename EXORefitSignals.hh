@@ -8,8 +8,17 @@
 #include "mkl_vml_functions.h"
 #include <string>
 #include <vector>
+#include <set>
 #include <map>
 #include <cassert>
+
+#ifdef USE_THREADS
+#include <boost/atomic.hpp>
+#include <boost/thread/mutex.hpp>
+
+// Some mutexes need to be accessible in multiple translation units -- declare them here.
+extern boost::mutex ProcessedFileMutex;
+#endif
 
 class EXOEventData;
 class EXOWaveformFT;
@@ -80,6 +89,14 @@ struct EventHandler {
   size_t fResultIndex;
 };
 
+// We want to sort event handlers by file position; makes file reading much more efficient.
+struct CompareEventHandlerPtrs {
+  bool operator()(const EventHandler* const &evt1, const EventHandler* const &evt2) {
+    return (evt1->fRunNumber < evt2->fRunNumber) or
+           (evt1->fRunNumber == evt2->fRunNumber and evt1->fEventNumber < evt2->fEventNumber);
+  }
+};
+
 #ifdef USE_LOCKFREE
 // Use a lock-free queue so that multiple threads can push and pop events to be handled without a manager.
 #include <boost/lockfree/queue.hpp>
@@ -113,6 +130,12 @@ class EXORefitSignals
   int Initialize();
   void AcceptEvent(EXOEventData* ED, Long64_t entryNum);
   void FlushEvents();
+
+#ifdef USE_THREADS
+  boost::atomic<bool> fProcessingIsDone; // Permit notification that no more events will be finished.
+#endif
+  void FinishEventThread();
+  size_t GetFinishEventQueueLength();
 
   ~EXORefitSignals();
 
@@ -170,9 +193,12 @@ class EXORefitSignals
   queue_type fEventHandlerResults;
   void HandleEventsInThread();
   void DoPassThroughEvents();
-  void FinishEvent(EventHandler* event);
   EventHandler* PopAnEvent();
   void PushAnEvent(EventHandler* evt);
+
+  std::set<EventHandler*, CompareEventHandlerPtrs> fEventsToFinish;
+  void PushFinishedEvent(EventHandler* event);
+  void FinishEvent(EventHandler* event);
 
   // Block BiCGSTAB algorithm.
   bool DoBlBiCGSTAB(EventHandler& event);

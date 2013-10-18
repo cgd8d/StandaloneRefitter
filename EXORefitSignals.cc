@@ -47,13 +47,14 @@
 
 #ifdef USE_THREADS
 // We currently use the boost::threads library, if threading is enabled.
-#include <boost/thread/mutex.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/thread/detail/thread_group.hpp>
 
 // Create basic mutexes for two multiple-writer situations.
-boost::mutex FinishEventMutex; // tinput and toutput are not thread-safe.
+boost::mutex ProcessedFileMutex;
+boost::mutex RawFileMutex;
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
+boost::mutex FFTWMutex;
 
 // And a mutex for writing debugging output from threaded parts of the code.
 boost::mutex CoutMutex;
@@ -63,6 +64,9 @@ boost::mutex CoutMutex;
 boost::mutex EventQueueMutex;
 boost::mutex EventResultsMutex;
 #endif
+
+// We always surround EventsToFinish with a mutex, since there is no lockfree sorted container.
+boost::mutex EventsToFinishMutex;
 
 #endif
 
@@ -77,6 +81,9 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
   fVerbose(false),
   fDoRestarts(100),
   fNumMulsToAccumulate(500),
+#ifdef USE_THREADS
+  fProcessingIsDone(false),
+#endif
   fInputModule(inputModule),
   fWFTree(wfTree),
   fOutputModule(outputModule),
@@ -412,7 +419,13 @@ EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
   for(size_t i = 0; i < timeModel.GetLength(); i++) timeModel[i] = timeModel_fine[i*refinedFactor];
 
   EXOWaveformFT fwf;
+#ifdef USE_THREADS
+  FFTWMutex.lock();
+#endif
   EXOFastFourierTransformFFTW::GetFFT(timeModel.GetLength()).PerformFFT(timeModel, fwf);
+#ifdef USE_THREADS
+  FFTWMutex.unlock();
+#endif
   assert(fwf.GetLength() == 1025); // Just to make sure I'm reasoning properly.
   return fwf;
 }
@@ -543,7 +556,13 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
   }
 
   EXOWaveformFT fwf;
+#ifdef USE_THREADS
+  FFTWMutex.lock();
+#endif
   EXOFastFourierTransformFFTW::GetFFT(2048).PerformFFT(wf, fwf);
+#ifdef USE_THREADS
+  FFTWMutex.unlock();
+#endif
 
   std::vector<double> out;
   out.resize(2*1024-1);
@@ -572,14 +591,20 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
-    FinishEvent(event);
+#ifdef USE_THREADS
+    ProcessedFileMutex.unlock();
+#endif
+    PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
 
   // If the waveforms aren't full-length, skip for now (although we should be able to handle them later).
   if(ED->fEventHeader.fSampleCount != 2047) {
-    FinishEvent(event);
+#ifdef USE_THREADS
+    ProcessedFileMutex.unlock();
+#endif
+    PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -587,7 +612,10 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // For now, we also only deal with events containing *exactly* one scintillation cluster.
   // There's nothing theoretical that warrants this; it's just easier to code up.
   if(ED->GetNumScintillationClusters() != 1) {
-    FinishEvent(event);
+#ifdef USE_THREADS
+    ProcessedFileMutex.unlock();
+#endif
+    PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -603,7 +631,10 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     FullClusters.push_back(clu);
   }
   if(FullClusters.empty()) {
-    FinishEvent(event);
+#ifdef USE_THREADS
+    ProcessedFileMutex.unlock();
+#endif
+    PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -661,7 +692,10 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     if(event->fExpectedYieldPerGang[fChannels[i]] > 1) HasYield = true;
   }
   if(not HasYield) {
-    FinishEvent(event);
+#ifdef USE_THREADS
+    ProcessedFileMutex.unlock();
+#endif
+    PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -693,6 +727,9 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
                                                                "source_calibration",
                                                                ED->fEventHeader);
     if(not electronicsShapers or not GainsFromDatabase) {
+#ifdef USE_THREADS
+      ProcessedFileMutex.unlock();
+#endif
       std::cout<<"Unable to get electronics or gains from the database."<<std::endl;
       std::exit(1);
     }
@@ -760,6 +797,9 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     } // End loop over u-wire signals.
   } // (which we only did if we're handling wire signals.
   event->fNumSignals += event->fWireModel.size();
+#endif
+#ifdef USE_THREADS
+  ProcessedFileMutex.unlock(); // Done with ED
 #endif
 
   // For convenience, store the column length we'll be dealing with.
@@ -856,28 +896,17 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 {
   // Compute and fill denoised signals, as appropriate.
   // Then pass the filled event to the output module.
-#ifdef USE_THREADS
-  static SafeStopwatch FinishEventGetLockWatch("FinishEvent::GetLock (threaded, mostly)");
-  SafeStopwatch::tag FinishEventGetLockTag = FinishEventGetLockWatch.Start();
-  FinishEventMutex.lock(); // Wait until we get a lock.
-  FinishEventGetLockWatch.Stop(FinishEventGetLockTag);
-#endif
-  static SafeStopwatch FinishEventInLockWatch("FinishEvent::AllInsideLock (threaded, mostly)");
-  SafeStopwatch::tag FinishEventInLockTag = FinishEventInLockWatch.Start();
   if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
 
   std::vector<double> Results;
   if(not event->fX.empty()) {
     if(fVerbose) std::cout<<"\tThis entry has denoised results to compute."<<std::endl;
-    // Undo preconditioning of X.
-    DoInvRPrecon(event->fX, *event);
-    for(size_t i = 0; i < event->fX.size(); i++) {
-      size_t imod = i % event->fColumnLength;
-      if(imod < fNoiseColumnLength) event->fX[i] *= fInvSqrtNoiseDiag[imod];
-    }
     Results.assign(event->fNumSignals, 0);
 
     // We need to compute denoised signals.
+#ifdef USE_THREADS
+    RawFileMutex.lock();
+#endif
     static SafeStopwatch GetRawWatch("FinishEvent::GetRawEntry (threaded, mostly)");
     SafeStopwatch::tag GetRawTag = GetRawWatch.Start();
     fWFTree.GetEntryWithIndex(event->fRunNumber, event->fEventNumber);
@@ -892,7 +921,13 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
       // Take the Fourier transform.
       EXODoubleWaveform dwf = wf->Convert<Double_t>();
       EXOWaveformFT fwf;
+#ifdef USE_THREADS
+      FFTWMutex.lock();
+#endif
       EXOFastFourierTransformFFTW::GetFFT(dwf.GetLength()).PerformFFT(dwf, fwf);
+#ifdef USE_THREADS
+      FFTWMutex.unlock();
+#endif
 
       // Extract the real part.
       EXODoubleWaveform rwf;
@@ -907,6 +942,11 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
       for(size_t f = 0; f < fwf.GetLength(); f++) iwf[f] = fwf[f].imag();
       WF_imag.push_back(iwf);
     }
+
+#ifdef USE_THREADS
+    // We've copied everything we need, so it would be safe for another thread to use this file/tree.
+    RawFileMutex.unlock();
+#endif
 
     // Produce estimates of the signals.
     for(size_t i = 0; i < Results.size(); i++) {
@@ -924,10 +964,10 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     }
   } // End setting of denoised energy signals.
 
-  static SafeStopwatch GetProcWatch("FinishEvent::GetProcessedEntry (threaded, mostly)");
-  SafeStopwatch::tag GetProcTag = GetProcWatch.Start();
+#ifdef USE_THREADS
+  ProcessedFileMutex.lock();
+#endif
   EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
-  GetProcWatch.Stop(GetProcTag);
 
   // We need to clear out the denoised information here, since we just freshly read the event from file.
   for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
@@ -961,14 +1001,10 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
   }
 
-  static SafeStopwatch WriteProcWatch("FinishEvent::WriteProcEntry (threaded, mostly)");
-  SafeStopwatch::tag WriteProcTag = WriteProcWatch.Start();
   fOutputModule.ProcessEvent(ED);
-  WriteProcWatch.Stop(WriteProcTag);
   if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
-  FinishEventInLockWatch.Stop(FinishEventInLockTag);
 #ifdef USE_THREADS
-  FinishEventMutex.unlock(); // Release access to tinput and toutput for other threads.
+  ProcessedFileMutex.unlock();
 #endif
   delete event;
 }
@@ -1499,7 +1535,7 @@ void EXORefitSignals::HandleEventsInThread()
       // This event is done.
       static SafeStopwatch FinishEventWatch("FinishEvent (threaded)");
       SafeStopwatch::tag FinishEventTag = FinishEventWatch.Start();
-      FinishEvent(evt); // Deletes the EventHandler object.
+      PushFinishedEvent(evt); // Deletes the EventHandler object.
       FinishEventWatch.Stop(FinishEventTag);
     }
     else {
@@ -1610,4 +1646,87 @@ void EXORefitSignals::DoRestart(EventHandler& event)
   event.fprecon_tmp = event.fX;
   DoInvRPrecon(event.fprecon_tmp, event);
   event.fResultIndex = RequestNoiseMul(event.fprecon_tmp, event.fColumnLength);
+}
+
+void EXORefitSignals::PushFinishedEvent(EventHandler* event)
+{
+  // Store an event which is ready to be finished.
+  // Also clear all of the unneeded large vectors in the event.
+
+  // A simple clear doesn't force a deallocation, which is what we need here.
+  std::vector<double>().swap(event->fR);
+  std::vector<double>().swap(event->fP);
+  std::vector<double>().swap(event->fR0hat);
+  std::vector<double>().swap(event->fV);
+  std::vector<double>().swap(event->fprecon_tmp);
+
+  // Also undo preconditioning of X.
+  // (Don't defer this, or important quantities may get changed by a new noise correlation matrix.)
+  DoInvRPrecon(event->fX, *event);
+  for(size_t i = 0; i < event->fX.size(); i++) {
+    size_t imod = i % event->fColumnLength;
+    if(imod < fNoiseColumnLength) event->fX[i] *= fInvSqrtNoiseDiag[imod];
+  }
+
+#ifdef USE_THREADS
+  EventsToFinishMutex.lock();
+#endif
+  fEventsToFinish.insert(event);
+#ifdef USE_THREADS
+  EventsToFinishMutex.unlock();
+#endif
+}
+
+void EXORefitSignals::FinishEventThread()
+{
+  // Call FinishEvent repeatedly until the queue is empty.
+  // When the queue is empty, either return or sleep until more events are available.
+  while(true) {
+#ifdef USE_THREADS
+    EventsToFinishMutex.lock();
+#endif
+    std::set<EventHandler*, CompareEventHandlerPtrs>::iterator it = fEventsToFinish.begin();
+#ifdef USE_THREADS
+    if(it == fEventsToFinish.end()) {
+      if(fProcessingIsDone.load(boost::memory_order_seq_cst)) {
+        it = fEventsToFinish.begin();
+        if(it == fEventsToFinish.end()) {
+          EventsToFinishMutex.unlock();
+          return;
+        }
+      }
+    }
+#endif
+    EventHandler* event = NULL;
+    if(it != fEventsToFinish.end()) {
+      event = *it;
+      fEventsToFinish.erase(it);
+    }
+#ifdef USE_THREADS
+    EventsToFinishMutex.unlock();
+#endif
+    if(event) FinishEvent(event);
+    else {
+#ifdef USE_THREADS
+      // Don't want to kill the thread -- just make it sleep for a bit.
+      boost::this_thread::sleep_for(boost::chrono::milliseconds(100));
+#else
+      // In sequential code, this function should return when there's nothing left to finish.
+      return;
+#endif
+    }
+  } // while(true)
+}
+
+size_t EXORefitSignals::GetFinishEventQueueLength()
+{
+  // Number of events currently queued to be finished.
+#ifdef USE_THREADS
+  EventsToFinishMutex.lock();
+#endif
+  size_t queue_length = fEventsToFinish.size();
+#ifdef USE_THREADS
+  EventsToFinishMutex.unlock();
+#endif
+  return queue_length;
 }

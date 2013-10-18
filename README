@@ -99,3 +99,5 @@ Things that I can work on:
 	Converting code to optionally work with either ACML or MKL. (ACML documentation is terrible.)
 
 
+
+ToDO: If fMin, fMax, or fChannels are changed mid-run, then there will be a race condition with the FinishEvent thread.
