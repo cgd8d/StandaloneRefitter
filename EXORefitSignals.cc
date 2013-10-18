@@ -897,15 +897,19 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   // Then pass the filled event to the output module.
   if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
 
+#ifdef USE_THREADS
+  // For some reason, using the raw and processed trees synchronously causes corruption issues.
+  // Will debug, but in the meantime make them both mutually exclusive.
+  ProcessedFileMutex.lock();
+  RawFileMutex.lock();
+#endif
+
   std::vector<double> Results;
   if(not event->fX.empty()) {
     if(fVerbose) std::cout<<"\tThis entry has denoised results to compute."<<std::endl;
     Results.assign(event->fNumSignals, 0);
 
     // We need to compute denoised signals.
-#ifdef USE_THREADS
-    RawFileMutex.lock();
-#endif
     static SafeStopwatch GetRawWatch("FinishEvent::GetRawEntry (threaded, mostly)");
     SafeStopwatch::tag GetRawTag = GetRawWatch.Start();
     Long64_t RawEntryNum = fWFTree.GetEntryNumberWithIndex(event->fRunNumber, event->fEventNumber);
@@ -943,11 +947,6 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
       WF_imag.push_back(iwf);
     }
 
-#ifdef USE_THREADS
-    // We've copied everything we need, so it would be safe for another thread to use this file/tree.
-    RawFileMutex.unlock();
-#endif
-
     // Produce estimates of the signals.
     for(size_t i = 0; i < Results.size(); i++) {
       for(size_t f = 0; f <= fMaxF-fMinF; f++) {
@@ -964,9 +963,6 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     }
   } // End setting of denoised energy signals.
 
-#ifdef USE_THREADS
-  ProcessedFileMutex.lock();
-#endif
   EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
 
   // We need to clear out the denoised information here, since we just freshly read the event from file.
@@ -1005,6 +1001,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
 #ifdef USE_THREADS
   ProcessedFileMutex.unlock();
+  RawFileMutex.unlock();
 #endif
   delete event;
 }
