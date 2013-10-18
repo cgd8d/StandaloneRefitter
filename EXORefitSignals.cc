@@ -1662,10 +1662,12 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
 
   // Also undo preconditioning of X.
   // (Don't defer this, or important quantities may get changed by a new noise correlation matrix.)
-  DoInvRPrecon(event->fX, *event);
-  for(size_t i = 0; i < event->fX.size(); i++) {
-    size_t imod = i % event->fColumnLength;
-    if(imod < fNoiseColumnLength) event->fX[i] *= fInvSqrtNoiseDiag[imod];
+  if(not event->fX.empty()) {
+    DoInvRPrecon(event->fX, *event);
+    for(size_t i = 0; i < event->fX.size(); i++) {
+      size_t imod = i % event->fColumnLength;
+      if(imod < fNoiseColumnLength) event->fX[i] *= fInvSqrtNoiseDiag[imod];
+    }
   }
 
 #ifdef USE_THREADS
