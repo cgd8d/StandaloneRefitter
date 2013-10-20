@@ -159,7 +159,10 @@ int main(int argc, char** argv)
 #ifdef USE_THREADS
     // This is tricky to release, because we can finish with it in so many places.
     // But it is important to release it as soon as possible, because it blocks FinishEvent.
+    static SafeStopwatch GetLockWatch("Get lock in main (sequential)");
+    SafeStopwatch::tag GetLockTag = GetLockWatch.Start();
     RootInterfaceMutex.lock();
+    GetLockWatch.Stop(GetLockTag);
 #endif
     static SafeStopwatch InputModuleWatch("InputModule in main (sequential)");
     SafeStopwatch::tag InputModuleTag = InputModuleWatch.Start();
