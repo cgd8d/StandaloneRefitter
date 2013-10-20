@@ -161,7 +161,10 @@ int main(int argc, char** argv)
     // But it is important to release it as soon as possible, because it blocks FinishEvent.
     ProcessedFileMutex.lock();
 #endif
+    static SafeStopwatch InputModuleWatch("InputModule in main (sequential)");
+    SafeStopwatch::tag InputModuleTag = InputModuleWatch.Start();
     EXOEventData* ED = InputModule.GetEvent(entryNum);
+    InputModuleWatch.Stop(InputModuleTag);
     if(ED == NULL) {
 #ifdef USE_THREADS
       ProcessedFileMutex.unlock();
@@ -178,12 +181,15 @@ int main(int argc, char** argv)
   SafeStopwatch::tag FlushEventsTag = FlushEventsWatch.Start();
   RefitSig.FlushEvents();
   FlushEventsWatch.Stop(FlushEventsTag);
+  static SafeStopwatch WaitForFinisherWatch("Waiting for events to be finished at the end (sequential)");
+  SafeStopwatch::tag WaitForFinisherTag = WaitForFinisherWatch.Start();
 #ifdef USE_THREADS
   RefitSig.fProcessingIsDone.store(true, boost::memory_order_seq_cst);
   finishThread.join();
 #else
   RefitSig.FinishEventThread();
 #endif
+  WaitForFinisherWatch.Stop(WaitForFinisherTag);
   OutputModule.ShutDown();
   WholeProgramWatch.Stop(WholeProgramTag);
 }
