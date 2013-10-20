@@ -18,9 +18,9 @@ else
 	export ROOT_LIBS="-lRIO -lHist -lGraf -lTree -lNet -lGpad -lTreePlayer -lNetx -lXrdClient -lCore -lMathCore -lMatrix -lThread -lCint -lGraf3d"
 	export MPI_MACROS="-DUSE_MPI"
 	if [ "$NERSC_HOST" = "hopper" ]; then
-		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=5 -DUSE_LOCKFREE"
+		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6 -DUSE_LOCKFREE"
 	elif [ "$NERSC_HOST" = "edison" ]; then
-		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=11 -DUSE_LOCKFREE"
+		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=12 -DUSE_LOCKFREE"
 	else
 		echo "No match to nersc host."
 		exit 1
