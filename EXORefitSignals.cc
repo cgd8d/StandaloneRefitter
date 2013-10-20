@@ -1675,15 +1675,19 @@ void EXORefitSignals::FinishEventThread()
   int main_priority = getpriority(PRIO_PROCESS, tid);
   std::cout<<"FinishEventThread has priority "<<main_priority<<"; reducing to "<<main_priority+5<<std::endl;
   setpriority(PRIO_PROCESS, tid, main_priority+5);
-
-  // Also, wait a minute for a few finished results to start accumulating.
-  // This is mainly so that many processes aren't all inefficient together at the beginning.
-  boost::this_thread::sleep_for(boost::chrono::minutes(1));
 #endif
 
   while(true) {
 #ifdef USE_THREADS
     EventsToFinishMutex.lock();
+
+    // Force ourselves to wait until the finish-events queue has a certain length (or processing is done).
+    while(fProcessingIsDone.load(boost::memory_order_seq_cst) == false and
+          fEventsToFinish.size() < 2000) {
+      EventsToFinishMutex.unlock();
+      boost::this_thread::sleep_for(boost::chrono::seconds(5));
+      EventsToFinishMutex.lock();
+    }
 #endif
     std::set<EventHandler*, CompareEventHandlerPtrs>::iterator it = fEventsToFinish.begin();
 #ifdef USE_THREADS
