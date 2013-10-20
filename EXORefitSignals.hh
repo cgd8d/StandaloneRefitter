@@ -60,6 +60,7 @@ struct EventHandler {
   std::map<unsigned char, double> fExpectedYieldPerGang; // Expected magnitudes of Th gamma line (ADC).
   std::vector<double> fmodel_realimag;
   double fExpectedEnergy_keV; // For appropriate handling of Poisson noise.
+  std::map<unsigned char, double> fAPDGainMapEval;
 
   // Information on the current status and data of the solver.
   // We need enough information so that when a matrix multiplication with noise finishes,
@@ -162,6 +163,7 @@ class EXORefitSignals
   std::string fLightmapFilename;
   std::map<unsigned char, TH3D*> fLightMaps;
   std::map<unsigned char, TGraph*> fGainMaps;
+  std::map<unsigned char, double> fGainMapAtT0;
   std::vector<unsigned char> fChannels;
   size_t fFirstAPDChannelIndex;
 

@@ -332,6 +332,7 @@ int EXORefitSignals::Initialize()
     std::string old_gainmap = gainmapname.str();
     std::string new_gainmap = old_gainmap + "_clone";
     fGainMaps[gang] = (TGraph*)LightmapFile->Get(old_gainmap.c_str())->Clone(new_gainmap.c_str());
+    fGainMapAtT0[gang] = fGainMaps[gang]->Eval(1355409118.254096);
   }
   delete LightmapFile;
 
@@ -522,8 +523,7 @@ double EXORefitSignals::GetGain(unsigned char channel, EventHandler& event) cons
     default: Gain *= 0; // Bad or non-existent channel.
   }
   // Time-dependence from the gainmap.
-  const TGraph* GainGraph = fGainMaps.at(channel);
-  Gain *= GainGraph->Eval(event.fUnixTimeOfEvent)/GainGraph->Eval(1355409118.254096);
+  Gain *= event.fAPDGainMapEval.at(channel)/fGainMapAtT0.at(channel);
 
   Gain *= 32.e-9; // Convert from electrons to volts in the preamp. Roughly 1/(5 pF) gain.
   Gain *= 12.10; // Gain from shapers (amplification factor, and gain from transfer function.
@@ -651,13 +651,14 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fExpectedEnergy_keV = 0;
   for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
     event->fExpectedYieldPerGang[fChannels[i]] = 0;
+    event->fAPDGainMapEval[fChannels[i]] = fGainMaps[fChannels[i]]->Eval(event->fUnixTimeOfEvent);
   }
   for(size_t i = 0; i < FullClusters.size(); i++) {
     EXOChargeCluster* clu = FullClusters[i];
     event->fExpectedEnergy_keV += clu->fPurityCorrectedEnergy;
     for(size_t j = fFirstAPDChannelIndex; j < fChannels.size(); j++) {
       unsigned char gang = fChannels[j];
-      Double_t GainFuncVal = fGainMaps[gang]->Eval(event->fUnixTimeOfEvent);
+      Double_t GainFuncVal = event->fAPDGainMapEval[gang];
 
       // Make sure cluster is in the proper range for interpolation -- else return 0.
       Double_t LightMapVal;
