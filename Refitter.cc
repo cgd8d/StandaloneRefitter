@@ -146,7 +146,7 @@ int main(int argc, char** argv)
     if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
     if(entryNum % 100 == 0) {
 #ifdef USE_THREADS
-      while(RefitSig.GetFinishEventQueueLength() > 1000) {
+      while(RefitSig.GetFinishEventQueueLength() > 5000) {
         // If we're getting ahead of FinishEvent, wait a bit for it to catch up.
         // This is purely a memory concern of how many events we can save on the queue.
         std::cout<<"Stalling the computation threads for FinishEvent to catch up."<<std::endl;
