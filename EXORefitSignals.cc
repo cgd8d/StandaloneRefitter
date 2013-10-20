@@ -68,6 +68,11 @@ boost::mutex EventResultsMutex;
 // We always surround EventsToFinish with a mutex, since there is no lockfree sorted container.
 boost::mutex EventsToFinishMutex;
 
+// So we can lower the priority of the FinishEvent thread.
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/resource.h>
+
 #endif
 
 EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
@@ -1681,6 +1686,19 @@ void EXORefitSignals::FinishEventThread()
 {
   // Call FinishEvent repeatedly until the queue is empty.
   // When the queue is empty, either return or sleep until more events are available.
+
+#ifdef USE_THREADS
+  // Reduce thread priority -- we'd like for the threads which insert new events to get priority on the lock.
+  pid_t tid = syscall(SYS_gettid);
+  int main_priority = getpriority(PRIO_PROCESS, tid);
+  std::cout<<"FinishEventThread has priority "<<main_priority<<"; reducing to "<<main_priority+5<<std::endl;
+  setpriority(PRIO_PROCESS, tid, main_priority+5);
+
+  // Also, wait a minute for a few finished results to start accumulating.
+  // This is mainly so that many processes aren't all inefficient together at the beginning.
+  boost::this_thread::sleep_for(boost::chrono::minutes(1));
+#endif
+
   while(true) {
 #ifdef USE_THREADS
     EventsToFinishMutex.lock();
@@ -1709,7 +1727,8 @@ void EXORefitSignals::FinishEventThread()
     else {
 #ifdef USE_THREADS
       // Don't want to kill the thread -- just make it sleep for a bit.
-      boost::this_thread::sleep_for(boost::chrono::milliseconds(100));
+      if(fVerbose) std::cout<<"FinishEvents thread had nothing to do; pausing, then we'll continue."<<std::endl;
+      boost::this_thread::sleep_for(boost::chrono::seconds(5));
 #else
       // In sequential code, this function should return when there's nothing left to finish.
       return;

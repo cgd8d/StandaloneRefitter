@@ -149,7 +149,8 @@ int main(int argc, char** argv)
       while(RefitSig.GetFinishEventQueueLength() > 1000) {
         // If we're getting ahead of FinishEvent, wait a bit for it to catch up.
         // This is purely a memory concern of how many events we can save on the queue.
-        boost::this_thread::sleep_for(boost::chrono::milliseconds(100));
+        std::cout<<"Stalling the computation threads for FinishEvent to catch up."<<std::endl;
+        boost::this_thread::sleep_for(boost::chrono::seconds(5));
       }
 #else
       RefitSig.FinishEventThread();
