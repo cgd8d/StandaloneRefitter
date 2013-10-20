@@ -27,7 +27,7 @@ else
 	fi
 fi
 
-$CXX -O3 \
+$CXX -O3 -g \
 -DHAVE_TYPE_TRAITS=1 $THREAD_MACROS $MPI_MACROS \
 `root-config --cflags` -I`exo-config --incdir` -L`root-config --libdir` -L`exo-config --libdir` \
 -I$MKL_INC -L$MKL_LIBDIR -L$FFTW_DIR \
