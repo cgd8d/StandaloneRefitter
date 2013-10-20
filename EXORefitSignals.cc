@@ -51,10 +51,9 @@
 #include <boost/thread/detail/thread_group.hpp>
 
 // Create basic mutexes for two multiple-writer situations.
-boost::mutex ProcessedFileMutex;
-boost::mutex RawFileMutex;
+boost::mutex RootInterfaceMutex; // Catch-all mutex for many mutually exclusive things.
+                                 // FFTW; processed file access; raw file access.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
-boost::mutex FFTWMutex;
 
 // And a mutex for writing debugging output from threaded parts of the code.
 boost::mutex CoutMutex;
@@ -400,6 +399,7 @@ EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
   // However, generating it in real space allows us to deal with signals near the end of
   // the trace, where periodicity is violated.
   // There is still some potential for caching the time-domain waveform, though, if needed.
+  // NOTE: caller must have a lock on RootInterfaceMutex (due to FFTW, which is not thread-safe).
 
   EXODoubleWaveform timeModel_fine;
   int refinedFactor = 5;
@@ -424,13 +424,7 @@ EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
   for(size_t i = 0; i < timeModel.GetLength(); i++) timeModel[i] = timeModel_fine[i*refinedFactor];
 
   EXOWaveformFT fwf;
-#ifdef USE_THREADS
-  FFTWMutex.lock();
-#endif
   EXOFastFourierTransformFFTW::GetFFT(timeModel.GetLength()).PerformFFT(timeModel, fwf);
-#ifdef USE_THREADS
-  FFTWMutex.unlock();
-#endif
   assert(fwf.GetLength() == 1025); // Just to make sure I'm reasoning properly.
   return fwf;
 }
@@ -544,6 +538,7 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
                                                    const double Time) const
 {
   // Helper function for dealing with shaping and FFT of wire models.
+  // Note: caller must have a lock on RootInterfaceMutex due to the FFTW call.
   EXODoubleWaveform shapedIn;
   transfer.Transform(&in, &shapedIn);
   shapedIn /= Gain;
@@ -560,13 +555,7 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
   }
 
   EXOWaveformFT fwf;
-#ifdef USE_THREADS
-  FFTWMutex.lock();
-#endif
   EXOFastFourierTransformFFTW::GetFFT(2048).PerformFFT(wf, fwf);
-#ifdef USE_THREADS
-  FFTWMutex.unlock();
-#endif
 
   std::vector<double> out;
   out.resize(2*1024-1);
@@ -596,7 +585,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
 #ifdef USE_THREADS
-    ProcessedFileMutex.unlock();
+    RootInterfaceMutex.unlock();
 #endif
     PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
@@ -606,7 +595,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // If the waveforms aren't full-length, skip for now (although we should be able to handle them later).
   if(ED->fEventHeader.fSampleCount != 2047) {
 #ifdef USE_THREADS
-    ProcessedFileMutex.unlock();
+    RootInterfaceMutex.unlock();
 #endif
     PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
@@ -617,7 +606,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // There's nothing theoretical that warrants this; it's just easier to code up.
   if(ED->GetNumScintillationClusters() != 1) {
 #ifdef USE_THREADS
-    ProcessedFileMutex.unlock();
+    RootInterfaceMutex.unlock();
 #endif
     PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
@@ -636,7 +625,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   }
   if(FullClusters.empty()) {
 #ifdef USE_THREADS
-    ProcessedFileMutex.unlock();
+    RootInterfaceMutex.unlock();
 #endif
     PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
@@ -698,7 +687,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   }
   if(not HasYield) {
 #ifdef USE_THREADS
-    ProcessedFileMutex.unlock();
+    RootInterfaceMutex.unlock();
 #endif
     PushFinishedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
@@ -733,7 +722,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
                                                                ED->fEventHeader);
     if(not electronicsShapers or not GainsFromDatabase) {
 #ifdef USE_THREADS
-      ProcessedFileMutex.unlock();
+      RootInterfaceMutex.unlock();
 #endif
       std::cout<<"Unable to get electronics or gains from the database."<<std::endl;
       std::exit(1);
@@ -804,7 +793,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fNumSignals += event->fWireModel.size();
 #endif
 #ifdef USE_THREADS
-  ProcessedFileMutex.unlock(); // Done with ED
+  RootInterfaceMutex.unlock(); // Done with ED
 #endif
 
   // For convenience, store the column length we'll be dealing with.
@@ -906,8 +895,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 #ifdef USE_THREADS
   // For some reason, using the raw and processed trees synchronously causes corruption issues.
   // Will debug, but in the meantime make them both mutually exclusive.
-  ProcessedFileMutex.lock();
-  RawFileMutex.lock();
+  RootInterfaceMutex.lock();
 #endif
 
   std::vector<double> Results;
@@ -931,13 +919,8 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
       // Take the Fourier transform.
       EXODoubleWaveform dwf = wf->Convert<Double_t>();
       EXOWaveformFT fwf;
-#ifdef USE_THREADS
-      FFTWMutex.lock();
-#endif
+      // Note: not thread-safe (we use a buffer), but covered by RootInterfaceMutex.
       EXOFastFourierTransformFFTW::GetFFT(dwf.GetLength()).PerformFFT(dwf, fwf);
-#ifdef USE_THREADS
-      FFTWMutex.unlock();
-#endif
 
       // Extract the real part.
       EXODoubleWaveform rwf;
@@ -1006,8 +989,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   fOutputModule.ProcessEvent(ED);
   if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
 #ifdef USE_THREADS
-  ProcessedFileMutex.unlock();
-  RawFileMutex.unlock();
+  RootInterfaceMutex.unlock();
 #endif
   delete event;
 }

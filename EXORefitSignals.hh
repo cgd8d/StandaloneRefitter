@@ -18,7 +18,7 @@
 #include <boost/thread/mutex.hpp>
 
 // Some mutexes need to be accessible in multiple translation units -- declare them here.
-extern boost::mutex ProcessedFileMutex;
+extern boost::mutex RootInterfaceMutex;
 #endif
 
 class EXOEventData;
