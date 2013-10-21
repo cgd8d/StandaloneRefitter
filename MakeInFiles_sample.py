@@ -1,62 +1,72 @@
+"""
+Script to generate a set of job folders, each containing some number of job scripts.
+Make sure it can be run at SLAC, since our NERSC ROOT does not have xml enabled.
+We put the input files into a hierarchy rooted at pwd.
 
-import glob, os
+ToDO:
+Extract the number of entries in the processed run file from metadata.
+Verify that the processed file I see is truly available -- don't want to crash later for missing file.
+"""
 
-InOutDir = "/scratch1/scratchdirs/claytond/LightOnly/InOutFiles"
+ProcsPerJob = 10
 DenoisedOutDir = "/scratch1/scratchdirs/claytond/LightOnly"
 
 NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles"
 RunWindows = [(2464, 2699), (2700, 2852), (2853, 2891), (2892, 3117), (3118, 3329), (3330, 3699),
               (3700, 3949), (3950, 4149), (4150, 4579), (4580, 4779), (4780, 5197), (5198, 5367)]
-
-import glob
-rawFiles = glob.glob("/project/projectdirs/exo200/cal_data/raw/*/run*.root")
-procFiles = glob.glob("/project/projectdirs/exo200/cal_data/processed/*/proc*.root")
-
-RawProcNoiseGroups = []
-for rawFile in rawFiles:
-    tail = rawFile[-17:]
-    runNo = int(tail[:8])
-
+def GetNoiseFile(runNo):
     noiseFile = ""
     for noiseWindow in RunWindows:
         if runNo >= noiseWindow[0] and runNo <= noiseWindow[1]:
-            noiseFile = NoiseFileBase + "/%i_to_%i.dat" % noiseWindow
-            break
-    if noiseFile == "":
-        if runNo < RunWindows[0][0]: noiseFile = NoiseFileBase + "/%i_to_%i.dat" % RunWindows[0]
-        elif runNo > RunWindows[-1][1]: noiseFile = NoiseFileBase + "/%i_to_%i.dat" % RunWindows[-1]
-    if noiseFile == "":
-        print "Run %i is in a noise gap." % runNo
-        continue
+            return = NoiseFileBase + "/%i_to_%i.dat" % noiseWindow
+    # Currently I refuse to pick a noise file by any heuristic here.
+    raise ValueError("No noise file for run %i." % runNo)
 
-    for procFile in procFiles:
-        if procFile[-17:] == tail:
-            RawProcNoiseGroups.append((rawFile, procFile, noiseFile))
-            break
+import ROOT
+ROOT.gSystem.Load("libEXOUtilities")
+ProcDataset = ROOT.EXORunInfoManager.GetDataSet("Data/Processed/masked",
+                                                "run>=2464&&run<=5367")
 
-# Sort by size of processed file; this helps us pair short file segments together, which will finish faster.
-RawProcNoiseGroups.sort(key = lambda x: os.path.getsize(x[1]))
+def JobForProc(procFile, runNo):
+    FileParts = procFile.split('.')[-6:]
+    FileBase = FileParts[-1][-17:]
+    RawFileParts = FileParts
+    RawFileParts[3] = 'root'
+    RawFileParts[-1] = 'run' + FileBase
+    return "%s\n%s\n%s\n%s\n%i\n%i\n%f\n" %
+           ('/'.join(FileParts), # Processed file
+            '/'.join(RawFileParts), # Raw file
+            "%s/%i/denoised%s" % (DenoisedOutDir, runNo, FileBase), # Out file
+            GetNoiseFile(runNo), # noise file
+            0, -1, 0.1) # Run parameters
 
-NodeNum = -1
-while len(RawProcNoiseGroups) > 0:
-    NodeNum += 1
-    proc1 = RawProcNoiseGroups.pop()
-    if len(RawProcNoiseGroups) > 0: proc2 = RawProcNoiseGroups.pop()
-    else: proc2 = None
+OutRunList = []
+ProcList = []
+for runInfo in ProcDataset:
     try:
-        os.mkdir("%s/Node%03i" % (InOutDir, NodeNum))
-    except OSError: pass
-    with open("%s/Node%03i/infile0000.txt" % (InOutDir, NodeNum), 'w') as infile1:
-        infile1.write("%s\n%s\n%s\n%s\n%i\n%i\n%f\n" %
-                      (proc1[1], proc1[0],
-                       DenoisedOutDir + "/denoised" + proc1[1][-17:],
-                       proc1[2],
-                       0, 1000000, 0.1))
-    if proc2 == None: continue
-    with open("%s/Node%03i/infile0001.txt" % (InOutDir, NodeNum), 'w') as infile2:
-        infile2.write("%s\n%s\n%s\n%s\n%i\n%i\n%f\n" %
-                      (proc2[1], proc2[0],
-                       DenoisedOutDir + "/denoised" + proc2[1][-17:],
-                       proc2[2],
-                       0, 1000000, 0.1))
+        ProcsToInsert = []
+        for runFile in runInfo.GetRunFiles():
+            Job = JobForProc(runFile.GetFileLocation(), runInfo.GetRunNumber())
+            numEntries = runFile.FindMetaData("nEntries").AsInt()
+            ProcsToInsert.append((numEntries, Job))
+        ProcList += ProcsToInsert
+        print "Added jobs for run %i." % runInfo.GetRunNumber()
+    except:
+        print "Failed to add jobs for run %i." % runInfo.GetRunNumber()
+
+# Try to group processes of similar length together, so they finish in similar times.
+# Also make the shortest jobs go into the smallest group, since this should also reduce waste.
+ProcList.sort(key = lambda x: x[0])
+JobIndex = 0
+while len(ProcList) > 0:
+    ProcsInThisJob = []
+    for i in xrange(ProcsPerJob):
+        if len(ProcList) > 0: ProcsInThisJob.append(ProcList.pop()[1])
+    try:
+        os.mkdir('Job%04i' % JobIndex)
+    except:
+        for oldfile in glob.glob('Job%04i' % JobIndex): os.remove(oldfile)
+    for i in xrange(len(ProcsInThisJob)):
+        with open('Job%04i/infile%04i.txt' % (JobIndex, i), 'w') as infile:
+            infile.write(ProcsInThisJob[i])
 
