@@ -51,9 +51,9 @@
 #include <boost/thread/detail/thread_group.hpp>
 
 // Create basic mutexes for two multiple-writer situations.
-boost::mutex RootInterfaceMutex; // Catch-all mutex for many mutually exclusive things.
-                                 // FFTW; processed file access; raw file access.
+boost::mutex RootInterfaceMutex; // Mutex for processed event handling and everything that involves.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
+boost::mutex FFTWMutex; // EXOFastFourierTransformFFTW is not thread-safe; non-trivial to change.
 
 // And a mutex for writing debugging output from threaded parts of the code.
 boost::mutex CoutMutex;
@@ -399,7 +399,6 @@ EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
   // However, generating it in real space allows us to deal with signals near the end of
   // the trace, where periodicity is violated.
   // There is still some potential for caching the time-domain waveform, though, if needed.
-  // NOTE: caller must have a lock on RootInterfaceMutex (due to FFTW, which is not thread-safe).
 
   EXODoubleWaveform timeModel_fine;
   int refinedFactor = 5;
@@ -423,9 +422,15 @@ EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
   timeModel.SetLength(2048);
   for(size_t i = 0; i < timeModel.GetLength(); i++) timeModel[i] = timeModel_fine[i*refinedFactor];
 
+#ifdef USE_THREADS
+  FFTWMutex.lock();
+#endif
   EXOWaveformFT fwf;
   EXOFastFourierTransformFFTW::GetFFT(timeModel.GetLength()).PerformFFT(timeModel, fwf);
   assert(fwf.GetLength() == 1025); // Just to make sure I'm reasoning properly.
+#ifdef USE_THREADS
+  FFTWMutex.unlock();
+#endif
   return fwf;
 }
 
@@ -538,7 +543,6 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
                                                    const double Time) const
 {
   // Helper function for dealing with shaping and FFT of wire models.
-  // Note: caller must have a lock on RootInterfaceMutex due to the FFTW call.
   EXODoubleWaveform shapedIn;
   transfer.Transform(&in, &shapedIn);
   shapedIn /= Gain;
@@ -554,8 +558,14 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
     }
   }
 
+#ifdef USE_THREADS
+  FFTWMutex.lock()
+#endif
   EXOWaveformFT fwf;
   EXOFastFourierTransformFFTW::GetFFT(2048).PerformFFT(wf, fwf);
+#ifdef USE_THREADS
+  FFTWMutex.unlock()
+#endif
 
   std::vector<double> out;
   out.resize(2*1024-1);
@@ -892,12 +902,6 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   // Then pass the filled event to the output module.
   if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
 
-#ifdef USE_THREADS
-  // For some reason, using the raw and processed trees synchronously causes corruption issues.
-  // Will debug, but in the meantime make them both mutually exclusive.
-  RootInterfaceMutex.lock();
-#endif
-
   std::vector<double> Results;
   if(not event->fX.empty()) {
     if(fVerbose) std::cout<<"\tThis entry has denoised results to compute."<<std::endl;
@@ -913,6 +917,9 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 
     // Collect the fourier-transformed waveforms.  Save them split into real and complex parts.
     std::vector<EXODoubleWaveform> WF_real, WF_imag;
+#ifdef USE_THREADS
+    FFTWMutex.lock();
+#endif
     for(size_t i = 0; i < fChannels.size(); i++) {
       const EXOWaveform* wf = fWFData.GetWaveformWithChannel(fChannels[i]);
 
@@ -935,6 +942,9 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
       for(size_t f = 0; f < fwf.GetLength(); f++) iwf[f] = fwf[f].imag();
       WF_imag.push_back(iwf);
     }
+#ifdef USE_THREADS
+    FFTWMutex.unlock();
+#endif
 
     // Produce estimates of the signals.
     for(size_t i = 0; i < Results.size(); i++) {
@@ -952,6 +962,9 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
     }
   } // End setting of denoised energy signals.
 
+#ifdef USE_THREADS
+  RootInterfaceMutex.lock();
+#endif
   EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
 
   // We need to clear out the denoised information here, since we just freshly read the event from file.
