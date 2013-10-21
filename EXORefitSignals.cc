@@ -594,20 +594,14 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
-#ifdef USE_THREADS
-    RootInterfaceMutex.unlock();
-#endif
-    PushFinishedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
 
   // If the waveforms aren't full-length, skip for now (although we should be able to handle them later).
   if(ED->fEventHeader.fSampleCount != 2047) {
-#ifdef USE_THREADS
-    RootInterfaceMutex.unlock();
-#endif
-    PushFinishedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -615,10 +609,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // For now, we also only deal with events containing *exactly* one scintillation cluster.
   // There's nothing theoretical that warrants this; it's just easier to code up.
   if(ED->GetNumScintillationClusters() != 1) {
-#ifdef USE_THREADS
-    RootInterfaceMutex.unlock();
-#endif
-    PushFinishedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -634,10 +625,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     FullClusters.push_back(clu);
   }
   if(FullClusters.empty()) {
-#ifdef USE_THREADS
-    RootInterfaceMutex.unlock();
-#endif
-    PushFinishedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -696,10 +684,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     if(event->fExpectedYieldPerGang[fChannels[i]] > 1) HasYield = true;
   }
   if(not HasYield) {
-#ifdef USE_THREADS
-    RootInterfaceMutex.unlock();
-#endif
-    PushFinishedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -896,6 +881,58 @@ void EXORefitSignals::FlushEvents()
   while(not fEventHandlerQueue.empty()) DoPassThroughEvents();
 }
 
+void EXORefitSignals::FinishProcessedEvent(EventHandler* event, const std::vector<double> Results)
+{
+  // Grab the processed event from input; apply denoised results as necessary; and write to output.
+  // RootInterfaceMutex must be locked; this function will unlock it, which enforces that requirement.
+  // We will also delete event here.
+  // This function is particularly useful when called directly for events with no denoising to do;
+  // in that case, it allows us to complete handling of an event without unnecessary lock management.
+  if(fVerbose) std::cout<<"\tFinishProcessedEvent for entry "<<event->fEntryNumber<<std::endl;
+
+  // If this function is called by AcceptEvent, trees are fast at re-returning an already-gotten entry.
+  EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
+
+  // We need to clear out the denoised information here, since we just freshly read the event from file.
+  for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
+    ED->GetScintillationCluster(i)->fEnergy = ED->GetScintillationCluster(i)->fRawEnergy;
+    ED->GetScintillationCluster(i)->fRawEnergy = 0;
+    ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
+  }
+#ifdef ENABLE_CHARGE
+  for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
+    ED->GetUWireSignal(i)->fDenoisedEnergy = 0;
+  }
+  for(size_t i = 0; i < ED->GetNumChargeClusters(); i++) {
+    ED->GetChargeCluster(i)->fDenoisedEnergy = 0;
+  }
+#endif
+
+  if(not Results.empty()) {
+    // Translate signal magnitudes into corresponding objects.
+#ifdef ENABLE_CHARGE
+    if(not fAPDsOnly) {
+      for(size_t i = 0; i < event->fWireModel.size(); i++) {
+        size_t sigIndex = event->fWireModel[i].first;
+        EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
+        double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
+                                    (CLHEP::keV * ADC_BITS);
+        sig->fDenoisedEnergy = Results[i]*UWireScalingFactor;
+      }
+    }
+#endif
+    ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
+    ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
+  }
+
+  fOutputModule.ProcessEvent(ED);
+  if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
+#ifdef USE_THREADS
+  RootInterfaceMutex.unlock();
+#endif
+  delete event;
+}
+
 void EXORefitSignals::FinishEvent(EventHandler* event)
 {
   // Compute and fill denoised signals, as appropriate.
@@ -965,46 +1002,7 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
 #ifdef USE_THREADS
   RootInterfaceMutex.lock();
 #endif
-  EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
-
-  // We need to clear out the denoised information here, since we just freshly read the event from file.
-  for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
-    ED->GetScintillationCluster(i)->fEnergy = ED->GetScintillationCluster(i)->fRawEnergy;
-    ED->GetScintillationCluster(i)->fRawEnergy = 0;
-    ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
-  }
-#ifdef ENABLE_CHARGE
-  for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
-    ED->GetUWireSignal(i)->fDenoisedEnergy = 0;
-  }
-  for(size_t i = 0; i < ED->GetNumChargeClusters(); i++) {
-    ED->GetChargeCluster(i)->fDenoisedEnergy = 0;
-  }
-#endif
-
-  if(not Results.empty()) {
-    // Translate signal magnitudes into corresponding objects.
-#ifdef ENABLE_CHARGE
-    if(not fAPDsOnly) {
-      for(size_t i = 0; i < event->fWireModel.size(); i++) {
-        size_t sigIndex = event->fWireModel[i].first;
-        EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
-        double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
-                                    (CLHEP::keV * ADC_BITS);
-        sig->fDenoisedEnergy = Results[i]*UWireScalingFactor;
-      }
-    }
-#endif
-    ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
-    ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
-  }
-
-  fOutputModule.ProcessEvent(ED);
-  if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
-#ifdef USE_THREADS
-  RootInterfaceMutex.unlock();
-#endif
-  delete event;
+  FinishProcessedEvent(event, Results); // Releases RootInterfaceMutex; deletes event.
 }
 
 bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
