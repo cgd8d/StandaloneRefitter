@@ -89,7 +89,7 @@ int main(int argc, char** argv)
   // On NERSC, we always use xrootd.  Need the IP address of the MOM node.
   assert(argc == 3);
   std::string mom_ip = argv[2]; // Should also include port number used.
-  ProcessedFileName = "root://cgd8d@" + mom_ip + "/" + ProcessedFileName;
+  ProcessedFileName = "root://cgd8d@" + mom_ip + "/" + ProcessedFileName + "?cachesz=300000000";
   RawFileName = "root://cgd8d@" + mom_ip + "/" + RawFileName;
 #else
   assert(argc >= 4);
