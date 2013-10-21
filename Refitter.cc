@@ -142,7 +142,9 @@ int main(int argc, char** argv)
   boost::thread finishThread(&EXORefitSignals::FinishEventThread, &RefitSig);
 #endif
 
-  for(Long64_t entryNum = StartEntry; entryNum < StartEntry + NumEntries; entryNum++) {
+  for(Long64_t entryNum = StartEntry;
+      NumEntries == -1 or entryNum < StartEntry + NumEntries;
+      entryNum++) {
     if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
     if(entryNum % 100 == 0) {
 #ifdef USE_THREADS
