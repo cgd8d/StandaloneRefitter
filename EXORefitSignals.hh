@@ -101,6 +101,7 @@ struct CompareEventHandlerPtrs {
 
 #ifdef USE_LOCKFREE
 // Use a lock-free queue so that multiple threads can push and pop events to be handled without a manager.
+#pragma warning(disable:488)  // icc spits out alot of warnings because of the boost header
 #include <boost/lockfree/queue.hpp>
 typedef boost::lockfree::queue<EventHandler*> queue_type;
 #else
