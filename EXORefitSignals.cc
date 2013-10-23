@@ -423,14 +423,11 @@ EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
   for(size_t i = 0; i < timeModel.GetLength(); i++) timeModel[i] = timeModel_fine[i*refinedFactor];
 
 #ifdef USE_THREADS
-  FFTWMutex.lock();
+  boost::mutex::scoped_lock sL(FFTWMutex);
 #endif
   EXOWaveformFT fwf;
   EXOFastFourierTransformFFTW::GetFFT(timeModel.GetLength()).PerformFFT(timeModel, fwf);
   assert(fwf.GetLength() == 1025); // Just to make sure I'm reasoning properly.
-#ifdef USE_THREADS
-  FFTWMutex.unlock();
-#endif
   return fwf;
 }
 
@@ -558,14 +555,13 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
     }
   }
 
-#ifdef USE_THREADS
-  FFTWMutex.lock()
-#endif
   EXOWaveformFT fwf;
-  EXOFastFourierTransformFFTW::GetFFT(2048).PerformFFT(wf, fwf);
+  {
 #ifdef USE_THREADS
-  FFTWMutex.unlock()
+    boost::mutex::scoped_lock sL(FFTWMutex);
 #endif
+    EXOFastFourierTransformFFTW::GetFFT(2048).PerformFFT(wf, fwf);
+  }
 
   std::vector<double> out;
   out.resize(2*1024-1);
@@ -1436,7 +1432,7 @@ size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
   size_t NumCols = vec.size() / ColLength;
 
 #ifdef USE_THREADS
-  RequestNoiseMulMutex.lock(); // Lock the shared noise multiplication queue for this thread.
+  boost::mutex::scoped_lock sL(RequestNoiseMulMutex); // Protect fNoiseMulQueue.
 #endif
 
   size_t InitSize = fNoiseMulQueue.size();
@@ -1449,9 +1445,6 @@ size_t EXORefitSignals::RequestNoiseMul(std::vector<double>& vec,
   }
   fNumVectorsInQueue += NumCols;
 
-#ifdef USE_THREADS
-  RequestNoiseMulMutex.unlock();
-#endif
   return InitSize;
 }
 
@@ -1483,16 +1476,13 @@ EventHandler* EXORefitSignals::PopAnEvent()
   if(not fEventHandlerQueue.pop(evt)) evt = NULL;
 #else
 #ifdef USE_THREADS
-  EventQueueMutex.lock();
+  boost::mutex::scoped_lock sL(EventQueueMutex);
 #endif
   if(fEventHandlerQueue.empty()) evt = NULL;
   else {
     evt = fEventHandlerQueue.front();
     fEventHandlerQueue.pop();
   }
-#ifdef USE_THREADS
-  EventQueueMutex.unlock();
-#endif
 #endif
   return evt;
 }
@@ -1506,12 +1496,9 @@ void EXORefitSignals::PushAnEvent(EventHandler* evt)
   assert(fEventHandlerResults.bounded_push(evt));
 #else
 #ifdef USE_THREADS
-  EventResultsMutex.lock();
+  boost::mutex::scoped_lock sL(EventResultsMutex);
 #endif
   fEventHandlerResults.push(evt);
-#ifdef USE_THREADS
-  EventResultsMutex.unlock();
-#endif
 #endif
 }
 
@@ -1617,12 +1604,9 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
 
   if(fVerbose) {
 #ifdef USE_THREADS
-    CoutMutex.lock();
+    boost::mutex::scoped_lock sL(CoutMutex);
 #endif
     std::cout<<"Entry "<<event.fEntryNumber<<" has worst norm = "<<WorstNorm<<std::endl;
-#ifdef USE_THREADS
-    CoutMutex.unlock();
-#endif
     if(WorstNorm > fRThreshold*fRThreshold) return false;
   }
   return true;
@@ -1667,12 +1651,9 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
   }
 
 #ifdef USE_THREADS
-  EventsToFinishMutex.lock();
+  boost::mutex::scoped_lock sL(EventsToFinishMutex);
 #endif
   fEventsToFinish.insert(event);
-#ifdef USE_THREADS
-  EventsToFinishMutex.unlock();
-#endif
 }
 
 void EXORefitSignals::FinishEventThread()
@@ -1690,7 +1671,7 @@ void EXORefitSignals::FinishEventThread()
 
   while(true) {
 #ifdef USE_THREADS
-    EventsToFinishMutex.lock();
+    boost::mutex::scoped_lock sL(EventsToFinishMutex);
 
     // Force ourselves to wait until the finish-events queue has a certain length (or processing is done).
     while(fProcessingIsDone.load(boost::memory_order_seq_cst) == false and
@@ -1718,7 +1699,7 @@ void EXORefitSignals::FinishEventThread()
       fEventsToFinish.erase(it);
     }
 #ifdef USE_THREADS
-    EventsToFinishMutex.unlock();
+    sL.unlock();
 #endif
     if(event) FinishEvent(event);
     else {
@@ -1738,11 +1719,7 @@ size_t EXORefitSignals::GetFinishEventQueueLength()
 {
   // Number of events currently queued to be finished.
 #ifdef USE_THREADS
-  EventsToFinishMutex.lock();
+  boost::mutex::scoped_lock sL(EventsToFinishMutex);
 #endif
-  size_t queue_length = fEventsToFinish.size();
-#ifdef USE_THREADS
-  EventsToFinishMutex.unlock();
-#endif
-  return queue_length;
+  return fEventsToFinish.size();
 }
