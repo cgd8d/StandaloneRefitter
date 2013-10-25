@@ -206,7 +206,7 @@ class EXORefitSignals
   std::set<EventHandler*, CompareEventHandlerPtrs> fEventsToFinish;
   void PushFinishedEvent(EventHandler* event);
   void FinishEvent(EventHandler* event);
-  void FinishProcessedEvent(EventHandler* event, const std::vector<double> Results = std::vector<double>());
+  void FinishProcessedEvent(EventHandler* event, const std::vector<double>& Results = std::vector<double>());
 
   // Block BiCGSTAB algorithm.
   bool DoBlBiCGSTAB(EventHandler& event);

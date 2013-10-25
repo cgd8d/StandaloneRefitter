@@ -878,7 +878,7 @@ void EXORefitSignals::FlushEvents()
   while(not fEventHandlerQueue.empty()) DoPassThroughEvents();
 }
 
-void EXORefitSignals::FinishProcessedEvent(EventHandler* event, const std::vector<double> Results)
+void EXORefitSignals::FinishProcessedEvent(EventHandler* event, const std::vector<double>& Results)
 {
   // Grab the processed event from input; apply denoised results as necessary; and write to output.
   // We will also delete event here.
