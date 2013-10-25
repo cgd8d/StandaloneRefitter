@@ -14,7 +14,6 @@
 #include <cassert>
 
 #ifdef USE_THREADS
-#include <boost/atomic.hpp>
 #include <boost/thread/mutex.hpp>
 
 // Some mutexes need to be accessible in multiple translation units -- declare them here.
@@ -141,7 +140,7 @@ class EXORefitSignals
   void FlushEvents();
 
 #ifdef USE_THREADS
-  boost::atomic<bool> fProcessingIsDone; // Permit notification that no more events will be finished.
+  void SetProcessingIsFinished();
 #endif
   void FinishEventThread();
   size_t GetFinishEventQueueLength();
@@ -206,6 +205,9 @@ class EXORefitSignals
   EventHandler* PopAnEvent();
   void PushAnEvent(EventHandler* evt);
 
+#ifdef USE_THREADS
+  bool fProcessingIsDone; // Permit notification that no more events will be finished.
+#endif
   std::set<EventHandler*, CompareEventHandlerPtrs> fEventsToFinish;
   void PushFinishedEvent(EventHandler* event);
   void FinishEvent(EventHandler* event);

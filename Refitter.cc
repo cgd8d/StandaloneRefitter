@@ -186,7 +186,7 @@ int main(int argc, char** argv)
   static SafeStopwatch WaitForFinisherWatch("Waiting for events to be finished at the end (sequential)");
   SafeStopwatch::tag WaitForFinisherTag = WaitForFinisherWatch.Start();
 #ifdef USE_THREADS
-  RefitSig.fProcessingIsDone.store(true, boost::memory_order_seq_cst);
+  RefitSig.SetProcessingIsFinished();
   finishThread.join();
 #else
   RefitSig.FinishEventThread();

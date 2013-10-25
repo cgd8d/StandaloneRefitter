@@ -66,6 +66,7 @@ boost::mutex EventResultsMutex;
 
 // We always surround EventsToFinish with a mutex, since there is no lockfree sorted container.
 boost::mutex EventsToFinishMutex;
+boost::condition_variable EventsToFinishCondition;
 
 // So we can lower the priority of the FinishEvent thread.
 #include <unistd.h>
@@ -1654,6 +1655,10 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
   boost::mutex::scoped_lock sL(EventsToFinishMutex);
 #endif
   fEventsToFinish.insert(event);
+#ifdef USE_THREADS
+  assert(not fProcessingIsDone); // Certainly shouldn't be done, if we got here.
+  if ( fEventsToFinish.size() >= fFinishUpDesiredLength ) EventsToFinishCondition.notify_one();
+#endif
 }
 
 void EXORefitSignals::FinishEventThread()
@@ -1674,46 +1679,42 @@ void EXORefitSignals::FinishEventThread()
     boost::mutex::scoped_lock sL(EventsToFinishMutex);
 
     // Force ourselves to wait until the finish-events queue has a certain length (or processing is done).
-    while(fProcessingIsDone.load(boost::memory_order_seq_cst) == false and
+    while(not fProcessingIsDone and
           fEventsToFinish.size() < fFinishUpDesiredLength) {
-      EventsToFinishMutex.unlock();
-      boost::this_thread::sleep_for(boost::chrono::seconds(5));
-      EventsToFinishMutex.lock();
+      EventsToFinishCondition.wait(sL);
     }
 #endif
     std::set<EventHandler*, CompareEventHandlerPtrs>::iterator it = fEventsToFinish.begin();
-#ifdef USE_THREADS
     if(it == fEventsToFinish.end()) {
-      if(fProcessingIsDone.load(boost::memory_order_seq_cst)) {
-        it = fEventsToFinish.begin();
-        if(it == fEventsToFinish.end()) {
-          EventsToFinishMutex.unlock();
-          return;
-        }
-      }
-    }
+#ifdef USE_THREADS
+      // We assume only one io thread; in that case,
+      // if we weren't woken because there were events to finish,
+      // then we'd better have gotten here because processing is done.
+      assert(fProcessingIsDone);
 #endif
-    EventHandler* event = NULL;
-    if(it != fEventsToFinish.end()) {
-      event = *it;
-      fEventsToFinish.erase(it);
+      // Both sequential and threaded code should only get here because they're done.
+      return;
     }
+
+    EventHandler* event = *it;
+    fEventsToFinish.erase(it);
+
 #ifdef USE_THREADS
     sL.unlock();
 #endif
-    if(event) FinishEvent(event);
-    else {
-#ifdef USE_THREADS
-      // Don't want to kill the thread -- just make it sleep for a bit.
-      if(fVerbose) std::cout<<"FinishEvents thread had nothing to do; pausing, then we'll continue."<<std::endl;
-      boost::this_thread::sleep_for(boost::chrono::seconds(5));
-#else
-      // In sequential code, this function should return when there's nothing left to finish.
-      return;
-#endif
-    }
+    FinishEvent(event);
   } // while(true)
 }
+
+#ifdef USE_THREADS
+void EXORefitSignals::SetProcessingIsFinished()
+{
+  // Processing is completed, set and notify
+  boost::mutex::scoped_lock sL(EventsToFinishMutex);
+  fProcessingIsDone = true;
+  EventsToFinishCondition.notify_all();
+}
+#endif
 
 size_t EXORefitSignals::GetFinishEventQueueLength()
 {
