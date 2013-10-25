@@ -125,6 +125,9 @@ class EXORefitSignals
   bool fAPDsOnly; // Do not denoise wire signals; and do not use u-wires to denoise APDs.
   bool fUseWireAPDCorrelations; // For now, this isn't higher performance -- just for testing.
 #endif
+#ifdef USE_THREADS
+  size_t fFinishUpDesiredLength; // Number of events we'd like to accumulate before we start doing io.
+#endif
   bool fVerbose;
   size_t fDoRestarts; // 0 if we never restart; else, value indicates number of iterations before a restart.
   size_t fNumMulsToAccumulate;

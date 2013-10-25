@@ -82,6 +82,9 @@ EXORefitSignals::EXORefitSignals(EXOTreeInputModule& inputModule,
   fAPDsOnly(false),
   fUseWireAPDCorrelations(true),
 #endif
+#ifdef USE_THREADS
+  fFinishUpDesiredLength(2000),
+#endif
   fVerbose(false),
   fDoRestarts(100),
   fNumMulsToAccumulate(500),
@@ -1672,7 +1675,7 @@ void EXORefitSignals::FinishEventThread()
 
     // Force ourselves to wait until the finish-events queue has a certain length (or processing is done).
     while(fProcessingIsDone.load(boost::memory_order_seq_cst) == false and
-          fEventsToFinish.size() < 2000) {
+          fEventsToFinish.size() < fFinishUpDesiredLength) {
       EventsToFinishMutex.unlock();
       boost::this_thread::sleep_for(boost::chrono::seconds(5));
       EventsToFinishMutex.lock();
