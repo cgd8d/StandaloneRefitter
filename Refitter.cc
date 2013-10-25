@@ -159,26 +159,23 @@ int main(int argc, char** argv)
 #endif
     }
 #ifdef USE_THREADS
-    // This is tricky to release, because we can finish with it in so many places.
-    // But it is important to release it as soon as possible, because it blocks FinishEvent.
     static SafeStopwatch GetLockWatch("Get lock in main (sequential)");
     SafeStopwatch::tag GetLockTag = GetLockWatch.Start();
-    RootInterfaceMutex.lock();
+    boost::mutex::scoped_lock locLock(RootInterfaceMutex);
     GetLockWatch.Stop(GetLockTag);
 #endif
     static SafeStopwatch InputModuleWatch("InputModule in main (sequential)");
     SafeStopwatch::tag InputModuleTag = InputModuleWatch.Start();
     EXOEventData* ED = InputModule.GetEvent(entryNum);
     InputModuleWatch.Stop(InputModuleTag);
-    if(ED == NULL) {
-#ifdef USE_THREADS
-      RootInterfaceMutex.unlock();
-#endif
-      break;
-    }
+    if(ED == NULL) break;
     static SafeStopwatch AcceptEventWatch("AcceptEvent (sequential)");
     SafeStopwatch::tag AcceptEventTag = AcceptEventWatch.Start();
-    RefitSig.AcceptEvent(ED, entryNum);
+    RefitSig.AcceptEvent(ED, entryNum
+#ifdef USE_THREADS
+      , locLock
+#endif
+    );
     AcceptEventWatch.Stop(AcceptEventTag);
   }
 

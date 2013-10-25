@@ -130,7 +130,11 @@ class EXORefitSignals
   size_t fNumMulsToAccumulate;
 
   int Initialize();
-  void AcceptEvent(EXOEventData* ED, Long64_t entryNum);
+  void AcceptEvent(EXOEventData* ED, Long64_t entryNum
+#ifdef USE_THREADS
+  , boost::mutex::scoped_lock& locLock
+#endif
+   );
   void FlushEvents();
 
 #ifdef USE_THREADS

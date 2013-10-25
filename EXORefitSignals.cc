@@ -574,7 +574,11 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
 }
 #endif
 
-void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
+void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
+#ifdef USE_THREADS
+  , boost::mutex::scoped_lock& locLock
+#endif
+  )
 {
   // Push in one more event to handle; return whatever events are able to finish.
   // Do whatever matrix multiplications are now warranted.
@@ -712,9 +716,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
                                                                "source_calibration",
                                                                ED->fEventHeader);
     if(not electronicsShapers or not GainsFromDatabase) {
-#ifdef USE_THREADS
-      RootInterfaceMutex.unlock();
-#endif
       std::cout<<"Unable to get electronics or gains from the database."<<std::endl;
       std::exit(1);
     }
@@ -784,7 +785,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fNumSignals += event->fWireModel.size();
 #endif
 #ifdef USE_THREADS
-  RootInterfaceMutex.unlock(); // Done with ED
+  locLock.unlock(); // When locLock is destroyed, it will no longer auto release.
 #endif
 
   // For convenience, store the column length we'll be dealing with.
@@ -880,7 +881,6 @@ void EXORefitSignals::FlushEvents()
 void EXORefitSignals::FinishProcessedEvent(EventHandler* event, const std::vector<double> Results)
 {
   // Grab the processed event from input; apply denoised results as necessary; and write to output.
-  // RootInterfaceMutex must be locked; this function will unlock it, which enforces that requirement.
   // We will also delete event here.
   // This function is particularly useful when called directly for events with no denoising to do;
   // in that case, it allows us to complete handling of an event without unnecessary lock management.
@@ -923,9 +923,6 @@ void EXORefitSignals::FinishProcessedEvent(EventHandler* event, const std::vecto
 
   fOutputModule.ProcessEvent(ED);
   if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
-#ifdef USE_THREADS
-  RootInterfaceMutex.unlock();
-#endif
   delete event;
 }
 
@@ -996,9 +993,9 @@ void EXORefitSignals::FinishEvent(EventHandler* event)
   } // End setting of denoised energy signals.
 
 #ifdef USE_THREADS
-  RootInterfaceMutex.lock();
+  boost::mutex::scoped_lock sL(RootInterfaceMutex);
 #endif
-  FinishProcessedEvent(event, Results); // Releases RootInterfaceMutex; deletes event.
+  FinishProcessedEvent(event, Results); // Deletes event.
 }
 
 bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
