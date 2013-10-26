@@ -3,13 +3,8 @@
 #include "Constants.hh"
 #include "EXOUtilities/EXOWaveform.hh"
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
-
-#if defined(USE_THREADS) || defined(USE_PROCESSES)
-// So we can lower the priority of the FinishEvent thread.
-#include <unistd.h>
-#include <sys/syscall.h>
-#include <sys/resource.h>
-#endif
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <boost/thread/thread.hpp> 
 
 #ifdef USE_PROCESSES
 #include <boost/mpi/communicator.hpp>
@@ -186,15 +181,6 @@ void EventFinisher::Run()
   // Call FinishEvent repeatedly until the queue is empty.
   // When the queue is empty, either return or sleep until more events are available.
 
-#if defined(USE_THREADS) || defined(USE_PROCESSES)
-  // Reduce thread priority -- we'd like for the threads which insert new events to get priority on the lock.
-  // If we're using single-threaded processes, same deal -- don't fight the other process.
-  pid_t tid = syscall(SYS_gettid);
-  int main_priority = getpriority(PRIO_PROCESS, tid);
-  std::cout<<"FinishEventThread has priority "<<main_priority<<"; reducing to "<<main_priority+5<<std::endl;
-  setpriority(PRIO_PROCESS, tid, main_priority+5);
-#endif
-
 #if defined(USE_THREADS) && defined(USE_PROCESSES)
   boost::thread pull_data(&EventFinisher::ListenForArrivingEvents, this);
 #endif
@@ -260,19 +246,17 @@ size_t EventFinisher::GetFinishEventQueueLength()
 void EventFinisher::ListenForArrivingEvents()
 {
 #ifdef USE_THREADS
-  // Reduce thread priority -- we'd like for the threads which insert new events to get priority on the lock.
-  pid_t tid = syscall(SYS_gettid);
-  int main_priority = getpriority(PRIO_PROCESS, tid);
-  std::cout<<"FinishEventThread has priority "<<main_priority<<"; reducing to "<<main_priority+5<<std::endl;
-  setpriority(PRIO_PROCESS, tid, main_priority+5);
-
   // If we're using threads, we'll busy-wait until done.
   while (1)
 #endif // If we're not using threads, just receive once.
   {
     EventHandler* eh = new EventHandler;
-    boost::mpi::status s = gMPIComm.recv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
-    if(s.tag()) {
+    boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
+    boost::optional<boost::mpi::status> s; 
+    while ( ! (s = req.test()) ) {
+      boost::this_thread::sleep(boost::posix_time::millisec(1)); 
+    }
+    if(s->tag()) {
 #ifdef USE_THREADS
       SetProcessingIsFinished();
 #else
