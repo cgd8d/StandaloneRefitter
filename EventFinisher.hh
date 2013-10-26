@@ -49,6 +49,5 @@ class EventFinisher
   size_t fDesiredQueueLength;
   bool fProcessingIsDone;
 #endif
-  const double fThoriumEnergy_keV;
 };
 #endif

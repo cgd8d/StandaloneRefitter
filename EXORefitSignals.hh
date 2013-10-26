@@ -3,6 +3,7 @@
 
 #include "SafeStopwatch.hh"
 #include "EventHandler.hh"
+#include "Constants.hh"
 #include "Rtypes.h"
 #include "mkl_cblas.h"
 #include "mkl_lapacke.h"
@@ -76,7 +77,7 @@ class EXORefitSignals
  protected:
   EventFinisher& fEventFinisher;
 
-  // fNoiseCorrelations[f-fMinF] stores the matrix of noise correlations at frequency f.
+  // fNoiseCorrelations[f-MIN_F] stores the matrix of noise correlations at frequency f.
   // This matrix is a single contiguous array, ordered like:
   // <N^R_0 N^R_0> <N^I_0 N^R_0> <N^R_1 N^R_0> ... <N^R_0 N^I_0> ...
   // (Ie. in column-major format -- this facilitates the use of GEMM if a BLAS library is available.)
@@ -103,10 +104,6 @@ class EXORefitSignals
   size_t fNumEventsHandled;
   size_t fNumSignalsHandled;
   size_t fTotalIterationsDone;
-
-  const double fThoriumEnergy_keV;
-  const size_t fMinF;
-  const size_t fMaxF;
 
 #ifdef ENABLE_CHARGE
   // Wire digitization.
@@ -206,14 +203,14 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
         }
       }
       const std::vector<double>& modelWF = it->second;
-      for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+      for(size_t f = 0; f <= MAX_F - MIN_F; f++) {
         size_t Index1 = event.fColumnLength - event.fNumSignals + m;
         size_t Index2 = 2*fChannels.size()*f + channel_index;
         const size_t DiagIndex = Index2;
         for(size_t n = 0; n < event.fNumSignals; n++) {
           if(Lagrange) out[Index2] += (Add ? 1 : -1)*modelWF[2*f]*fInvSqrtNoiseDiag[DiagIndex]*in[Index1];
           if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f]*fInvSqrtNoiseDiag[DiagIndex]*in[Index2];
-          if(f < fMaxF-fMinF) {
+          if(f < MAX_F-MIN_F) {
             if(Lagrange) out[Index2+fChannels.size()] += (Add ? 1 : -1)*modelWF[2*f+1]*fInvSqrtNoiseDiag[DiagIndex+fChannels.size()]*in[Index1];
             if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f+1]*fInvSqrtNoiseDiag[DiagIndex+fChannels.size()]*in[Index2+fChannels.size()];
           }
@@ -233,7 +230,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     ExpectedYields.push_back(event.fExpectedYieldPerGang.at(fChannels[k]));
   }
   std::vector<double> Workspace(ExpectedYields.size(), 0);
-  for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+  for(size_t f = 0; f <= MAX_F - MIN_F; f++) {
     size_t StartIndex = 2*fChannels.size()*f + fFirstAPDChannelIndex;
 
     // Start with real blocks.
@@ -254,7 +251,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
     }
 
     // Now do imaginary blocks.
-    if(f == fMaxF - fMinF) continue;
+    if(f == MAX_F - MIN_F) continue;
     StartIndex += fChannels.size();
     vdMul(ExpectedYields.size(), &ExpectedYields[0], &fInvSqrtNoiseDiag[StartIndex], &Workspace[0]);
     if(Constraint) {

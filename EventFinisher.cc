@@ -1,5 +1,6 @@
 #include "EventFinisher.hh"
 #include "SafeStopwatch.hh"
+#include "Constants.hh"
 #include "EXOUtilities/EXOWaveform.hh"
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
 
@@ -21,12 +22,12 @@ EventFinisher& EventFinisher::Get(EXOTreeInputModule& inputModule,
 EventFinisher::EventFinisher(EXOTreeInputModule& inputModule, std::string RawFileName, std::string OutFileName)
 : fVerbose(true),
   fInputModule(inputModule),
-  fWaveformFile(RawFileName.c_str()),
+  fWaveformFile(RawFileName.c_str())
 #ifdef USE_THREADS
+  ,
   fDesiredQueueLength(2000),
-  fProcessingIsDone(false),
+  fProcessingIsDone(false)
 #endif
-  fThoriumEnergy_keV(2615)
 {
   fWaveformTree = dynamic_cast<TTree*>(fWaveformFile.Get("tree"));
   fWaveformTree->GetBranch("fWaveformData")->SetAddress(&fWFData);
@@ -94,7 +95,7 @@ void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<
       }
     }
 #endif
-    ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*fThoriumEnergy_keV;
+    ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*THORIUM_ENERGY_KEV;
     ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
   }
 
@@ -155,15 +156,15 @@ void EventFinisher::FinishEvent(EventHandler* event)
 
     // Produce estimates of the signals.
     for(size_t i = 0; i < Results.size(); i++) {
-      for(size_t f = 0; f <= event->fMaxF - event->fMinF; f++) {
+      for(size_t f = 0; f <= MAX_F - MIN_F; f++) {
         for(size_t chan_index = 0; chan_index < event->fChannels.size(); chan_index++) {
           size_t XIndex = event->fColumnLength*i + 2*event->fChannels.size()*f + chan_index;
-          Results[i] += event->fX[XIndex]*WF_real[chan_index][f + event->fMinF];
+          Results[i] += event->fX[XIndex]*WF_real[chan_index][f + MIN_F];
         }
-        if(f == event->fMaxF - event->fMinF) continue;
+        if(f == MAX_F - MIN_F) continue;
         for(size_t chan_index = 0; chan_index < event->fChannels.size(); chan_index++) {
           size_t XIndex = event->fColumnLength*i + 2*event->fChannels.size()*f + event->fChannels.size() + chan_index;
-          Results[i] += event->fX[XIndex]*WF_imag[chan_index][f + event->fMinF];
+          Results[i] += event->fX[XIndex]*WF_imag[chan_index][f + MIN_F];
         }
       }
     }

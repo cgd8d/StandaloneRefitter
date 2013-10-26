@@ -77,9 +77,6 @@ EXORefitSignals::EXORefitSignals(EventFinisher& finisher)
   fEventFinisher(finisher),
   fLightmapFilename("data/lightmap/LightMaps.root"),
   fRThreshold(0.1),
-  fThoriumEnergy_keV(2615),
-  fMinF(1),
-  fMaxF(1024),
 #ifdef USE_LOCKFREE
   fEventHandlerQueue(0), // The default lockfree constructor is not allowed.
   fEventHandlerResults(0), // http://boost.2283326.n4.nabble.com/lockfree-Faulty-static-assert-td4635029.html
@@ -139,7 +136,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
       break;
     }
   }
-  fNoiseColumnLength = fChannels.size() * (2*(fMaxF-fMinF) + 1);
+  fNoiseColumnLength = fChannels.size() * (2*(MAX_F-MIN_F) + 1);
   size_t FileNumChannels = NUMBER_READOUT_CHANNELS - 2*NCHANNEL_PER_WIREPLANE;
 
   // Pre-allocate memory for noise multiplication, plus a little extra (in case of multiple signals per event).
@@ -150,7 +147,7 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   // Note that we store the same-frequency blocks in column-major order,
   // to simplify GEMM calls (if BLAS is provided).
   // We also extract the diagonal entries, for the purpose of preconditioning.
-  fNoiseCorrelations.resize(fMaxF - fMinF + 1);
+  fNoiseCorrelations.resize(MAX_F - MIN_F + 1);
 
   std::filebuf NoiseFile;
   fNoiseDiag.clear();
@@ -160,14 +157,14 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
   assert(NoiseFile.pubseekoff(0, std::ios_base::end, std::ios_base::in) ==
          std::streampos(FileNumChannels*FileNumChannels*(4*1023+1)*sizeof(double)));
   assert(sizeof(double) == 8);
-  assert(fMinF == 1); // Else I'll need to generalize the code that produces these files.
-  for(size_t f = fMinF; f <= fMaxF; f++) {
-    bool IsFullBlock = (f != fMaxF);
-    std::vector<double>& block = fNoiseCorrelations[f-fMinF];
+  assert(MIN_F == 1); // Else I'll need to generalize the code that produces these files.
+  for(size_t f = MIN_F; f <= MAX_F; f++) {
+    bool IsFullBlock = (f != MAX_F);
+    std::vector<double>& block = fNoiseCorrelations[f-MIN_F];
     block.clear();
     block.reserve(fChannels.size()*fChannels.size()*(IsFullBlock ? 4 : 1));
 
-    std::streampos FreqFilePos = (f-fMinF)*4*sizeof(double)*FileNumChannels*FileNumChannels;
+    std::streampos FreqFilePos = (f-MIN_F)*4*sizeof(double)*FileNumChannels*FileNumChannels;
 
     // Go ahead and fetch the entire block from the file.
     // A few rows/columns aren't needed (suppressed or bad channels),
@@ -272,13 +269,13 @@ void EXORefitSignals::FillNoiseCorrelations(const EXOEventData& ED)
 
   // Go ahead and precondition the noise matrices.  This should improve the accuracy of multiplications.
   // So, N -> D^(-1/2) N D^(-1/2).
-  for(size_t f = fMinF; f <= fMaxF; f++) {
-    size_t BlockSize = fChannels.size()*(f < fMaxF ? 2 : 1);
-    size_t DiagIndex = 2*fChannels.size()*(f-fMinF);
+  for(size_t f = MIN_F; f <= MAX_F; f++) {
+    size_t BlockSize = fChannels.size()*(f < MAX_F ? 2 : 1);
+    size_t DiagIndex = 2*fChannels.size()*(f-MIN_F);
     for(size_t row = 0; row < BlockSize; row++) {
       for(size_t col = 0; col < BlockSize; col++) {
-        fNoiseCorrelations[f-fMinF][row + BlockSize*col] *= fInvSqrtNoiseDiag[DiagIndex + row];
-        fNoiseCorrelations[f-fMinF][row + BlockSize*col] *= fInvSqrtNoiseDiag[DiagIndex + col];
+        fNoiseCorrelations[f-MIN_F][row + BlockSize*col] *= fInvSqrtNoiseDiag[DiagIndex + row];
+        fNoiseCorrelations[f-MIN_F][row + BlockSize*col] *= fInvSqrtNoiseDiag[DiagIndex + col];
       }
     }
   }
@@ -574,8 +571,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
   event->fNumIterations = 0;
   event->fNumIterSinceReset = 0;
   event->fNumSignals = 0;
-  event->fMinF = fMinF;
-  event->fMaxF = fMaxF;
   event->fChannels = fChannels;
 
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
@@ -775,7 +770,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
 #endif
 
   // For convenience, store the column length we'll be dealing with.
-  event->fColumnLength = 2*fChannels.size()*(fMaxF-fMinF) + fChannels.size() + event->fNumSignals;
+  event->fColumnLength = 2*fChannels.size()*(MAX_F-MIN_F) + fChannels.size() + event->fNumSignals;
 
   // We can find the appropriate preconditioner here.
   // This is a pretty good preconditioner, obtained by approximating A ~ {{D L} {trans(L) 0}},
@@ -1137,30 +1132,30 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
 {
   // Poisson terms for APD channels.
   for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) { // APD gangs
-    double ChannelFactors = event.fExpectedEnergy_keV/fThoriumEnergy_keV;
+    double ChannelFactors = event.fExpectedEnergy_keV/THORIUM_ENERGY_KEV;
     ChannelFactors *= GetGain(fChannels[k], event);
     ChannelFactors *= event.fExpectedYieldPerGang.at(fChannels[k]);
 
     for(size_t n = 0; n < event.fNumSignals; n++) { // signals
       // Compute the factors common to all frequencies.
       double CommonFactor = 0;
-      for(size_t g = 0; g <= fMaxF - fMinF; g++) {
+      for(size_t g = 0; g <= MAX_F - MIN_F; g++) {
         size_t DiagIndex = 2*fChannels.size()*g + k;
         size_t InIndex = n*event.fColumnLength + DiagIndex;
         CommonFactor += event.fmodel_realimag[2*g] * in[InIndex] *
                         fInvSqrtNoiseDiag[DiagIndex];
-        if(g < fMaxF-fMinF) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+fChannels.size()] *
+        if(g < MAX_F-MIN_F) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+fChannels.size()] *
                                             fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
       }
       CommonFactor *= ChannelFactors;
 
       // Now actually transfer the changes to the out vector.
-      for(size_t f = 0; f <= fMaxF - fMinF; f++) {
+      for(size_t f = 0; f <= MAX_F - MIN_F; f++) {
         size_t DiagIndex = 2*fChannels.size()*f + k;
         size_t OutIndex = n*event.fColumnLength + DiagIndex;
         out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] *
                          fInvSqrtNoiseDiag[DiagIndex];
-        if(f < fMaxF-fMinF) out[OutIndex+fChannels.size()] += CommonFactor * event.fmodel_realimag[2*f+1] *
+        if(f < MAX_F-MIN_F) out[OutIndex+fChannels.size()] += CommonFactor * event.fmodel_realimag[2*f+1] *
                                                fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
       }
     }
@@ -1183,9 +1178,9 @@ void EXORefitSignals::DoNoiseMultiplication()
 
   // frequencies_per_thread is the number of frequencies to distribute, rounding down.
   // threads_with_extra is the number of threads we'll actually give one extra frequency to.
-  size_t frequencies_per_thread = (fMaxF-fMinF+1)/(NUM_THREADS); // round down
-  size_t threads_with_extra = (fMaxF-fMinF+1) - frequencies_per_thread*(NUM_THREADS);
-  assert(frequencies_per_thread*NUM_THREADS <= fMaxF-fMinF+1);
+  size_t frequencies_per_thread = (MAX_F-MIN_F+1)/(NUM_THREADS); // round down
+  size_t threads_with_extra = (MAX_F-MIN_F+1) - frequencies_per_thread*(NUM_THREADS);
+  assert(frequencies_per_thread*NUM_THREADS <= MAX_F-MIN_F+1);
   assert(threads_with_extra < NUM_THREADS);
 
   for(size_t i = 0; i < threads_with_extra; i++) {
@@ -1204,11 +1199,11 @@ void EXORefitSignals::DoNoiseMultiplication()
   }
   // Don't create the last thread; *this* is the last thread.
   size_t flo = threads_with_extra + ((NUM_THREADS)-1)*frequencies_per_thread;
-  DoNoiseMultiplication_Range(flo, (fMaxF-fMinF+1)); // to handle [0, fMaxF-fMinF], inclusive.
+  DoNoiseMultiplication_Range(flo, (MAX_F-MIN_F+1)); // to handle [0, MAX_F-MIN_F], inclusive.
   threads.join_all();
 #else
   // The sequential version.
-  DoNoiseMultiplication_Range(0, (fMaxF-fMinF+1)); // to handle [0, fMaxF-fMinF], inclusive.
+  DoNoiseMultiplication_Range(0, (MAX_F-MIN_F+1)); // to handle [0, MAX_F-MIN_F], inclusive.
 #endif
   if(fVerbose) std::cout<<"Done with DoNoiseMultiplication."<<std::endl;
 
@@ -1229,7 +1224,7 @@ void EXORefitSignals::DoNoiseMultiplication_Range(size_t flo, size_t fhi)
 
   for(size_t f = flo; f < fhi; f++) {
     size_t StartIndex = 2*fChannels.size()*f;
-    size_t BlockSize = fChannels.size() * (f < fMaxF - fMinF ? 2 : 1);
+    size_t BlockSize = fChannels.size() * (f < MAX_F - MIN_F ? 2 : 1);
     assert(fNoiseCorrelations[f].size() == BlockSize*BlockSize);
 
     static SafeStopwatch NoiseMulRangeWatch("DoNoiseMultiplication_Range (threaded)");

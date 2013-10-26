@@ -17,8 +17,6 @@ struct EventHandler {
   size_t fNumSignals;
   size_t fNumIterSinceReset;
   size_t fNumIterations; // Count the number of times we've tried to terminate.
-  size_t fMinF;
-  size_t fMaxF;
   std::vector<unsigned char> fChannels;
 
 #ifdef ENABLE_CHARGE
