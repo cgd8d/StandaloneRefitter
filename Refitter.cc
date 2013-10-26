@@ -15,6 +15,7 @@ Should be called like:
 
 
 #include "EXORefitSignals.hh"
+#include "EventFinisher.hh"
 #include "EXOUtilities/EXOEventData.hh"
 #include "EXOCalibUtilities/EXOCalibManager.hh"
 #include "EXOAnalysisManager/EXOTreeInputModule.hh"
@@ -113,15 +114,9 @@ int main(int argc, char** argv)
   std::cout<<"About to set filename."<<std::endl;
   InputModule.SetFilename(ProcessedFileName);
   std::cout<<"Successfully set filename."<<std::endl;
-  TXNetFile WaveformFile(RawFileName.c_str());
-  TTree* WaveformTree = dynamic_cast<TTree*>(WaveformFile.Get("tree"));
+  EventFinisher& finisher = EventFinisher::Get(InputModule, RawFileName, OutFileName);
 
-  EXOTreeOutputModule OutputModule;
-  OutputModule.SetOutputFilename(OutFileName);
-  OutputModule.Initialize();
-  OutputModule.BeginOfRun(NULL); // OK, fine -- shortcut here, I assume input has only one run.
-
-  EXORefitSignals RefitSig(InputModule, *WaveformTree, OutputModule);
+  EXORefitSignals RefitSig(finisher);
   EXOCalibManager::GetCalibManager().SetMetadataAccessType("text");
   RefitSig.SetNoiseFilename(NoiseFileName);
   RefitSig.SetRThreshold(Threshold);
@@ -139,7 +134,7 @@ int main(int argc, char** argv)
 
 #ifdef USE_THREADS
   // Start a finish-up thread.
-  boost::thread finishThread(&EXORefitSignals::FinishEventThread, &RefitSig);
+  boost::thread finishThread(&EventFinisher::Run, &finisher);
 #endif
 
   for(Long64_t entryNum = StartEntry;
@@ -148,14 +143,14 @@ int main(int argc, char** argv)
     if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
     if(entryNum % 100 == 0) {
 #ifdef USE_THREADS
-      while(RefitSig.GetFinishEventQueueLength() > 5000) {
+      while(finisher.GetFinishEventQueueLength() > 5000) {
         // If we're getting ahead of FinishEvent, wait a bit for it to catch up.
         // This is purely a memory concern of how many events we can save on the queue.
         std::cout<<"Stalling the computation threads for FinishEvent to catch up."<<std::endl;
         boost::this_thread::sleep_for(boost::chrono::seconds(5));
       }
 #else
-      RefitSig.FinishEventThread();
+      finisher.Run();
 #endif
     }
 #ifdef USE_THREADS
@@ -186,12 +181,11 @@ int main(int argc, char** argv)
   static SafeStopwatch WaitForFinisherWatch("Waiting for events to be finished at the end (sequential)");
   SafeStopwatch::tag WaitForFinisherTag = WaitForFinisherWatch.Start();
 #ifdef USE_THREADS
-  RefitSig.SetProcessingIsFinished();
+  finisher.SetProcessingIsFinished();
   finishThread.join();
 #else
-  RefitSig.FinishEventThread();
+  finisher.Run();
 #endif
   WaitForFinisherWatch.Stop(WaitForFinisherTag);
-  OutputModule.ShutDown();
   WholeProgramWatch.Stop(WholeProgramTag);
 }

@@ -3,7 +3,6 @@
 
 #include "SafeStopwatch.hh"
 #include "EventHandler.hh"
-#include "EXOUtilities/EXOWaveformData.hh"
 #include "Rtypes.h"
 #include "mkl_cblas.h"
 #include "mkl_lapacke.h"
@@ -21,6 +20,7 @@
 extern boost::mutex RootInterfaceMutex;
 #endif
 
+class EventFinisher;
 class EXOEventData;
 class EXOWaveformFT;
 class EXOTreeInputModule;
@@ -51,9 +51,7 @@ class EXORefitSignals
 {
  public:
   // Functions specified in the order they should be called.
-  EXORefitSignals(EXOTreeInputModule& inputModule,
-                  TTree& wfTree,
-                  EXOTreeOutputModule& outputModule);
+  EXORefitSignals(EventFinisher& finisher);
 
   void SetNoiseFilename(std::string name) { fNoiseFilename = name; }
   void SetLightmapFilename(std::string name) { fLightmapFilename = name; }
@@ -61,9 +59,6 @@ class EXORefitSignals
 #ifdef ENABLE_CHARGE
   bool fAPDsOnly; // Do not denoise wire signals; and do not use u-wires to denoise APDs.
   bool fUseWireAPDCorrelations; // For now, this isn't higher performance -- just for testing.
-#endif
-#ifdef USE_THREADS
-  size_t fFinishUpDesiredLength; // Number of events we'd like to accumulate before we start doing io.
 #endif
   bool fVerbose;
   size_t fDoRestarts; // 0 if we never restart; else, value indicates number of iterations before a restart.
@@ -76,22 +71,10 @@ class EXORefitSignals
 #endif
    );
   void FlushEvents();
-
-#ifdef USE_THREADS
-  void SetProcessingIsFinished();
-#endif
-  void FinishEventThread();
-  size_t GetFinishEventQueueLength();
-
   ~EXORefitSignals();
 
  protected:
-
-  // Handles so that we can read events in and save events as necessary.
-  EXOTreeInputModule& fInputModule;
-  TTree& fWFTree;
-  EXOWaveformData fWFData;
-  EXOTreeOutputModule& fOutputModule;
+  EventFinisher& fEventFinisher;
 
   // fNoiseCorrelations[f-fMinF] stores the matrix of noise correlations at frequency f.
   // This matrix is a single contiguous array, ordered like:
@@ -143,13 +126,7 @@ class EXORefitSignals
   EventHandler* PopAnEvent();
   void PushAnEvent(EventHandler* evt);
 
-#ifdef USE_THREADS
-  bool fProcessingIsDone; // Permit notification that no more events will be finished.
-#endif
-  std::set<EventHandler*, CompareEventHandlerPtrs> fEventsToFinish;
   void PushFinishedEvent(EventHandler* event);
-  void FinishEvent(EventHandler* event);
-  void FinishProcessedEvent(EventHandler* event, const std::vector<double>& Results = std::vector<double>());
 
   // Block BiCGSTAB algorithm.
   bool DoBlBiCGSTAB(EventHandler& event);
