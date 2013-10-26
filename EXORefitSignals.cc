@@ -1445,7 +1445,7 @@ void EXORefitSignals::DoPassThroughEvents()
 #endif
   }
 
-#if USE_PROCESSES
+#ifdef USE_PROCESSES
   // We're serial here, don't lock
   while (not fSaveToPushEH.empty()) {
     EHSet::iterator it = fSaveToPushEH.begin();
