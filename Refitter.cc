@@ -48,7 +48,7 @@ struct mpi_handler
     std::ostringstream ProcessRankString;
     ProcessRankString << std::setw(4) << std::setfill('0') << rank << ".txt";
     RankString = ProcessRankString.str();
-    Output.open(std::string(argv[1]) + "/outfile" + RankString);
+    Output.open((std::string(argv[1]) + "/outfile" + RankString).c_str());
     std::cout.rdbuf(Output.rdbuf()); // Redirect all output from this process to file.
     std::cerr.rdbuf(Output.rdbuf());
   }
@@ -78,7 +78,7 @@ int main(int argc, char** argv)
   double Threshold = 10;
 
 #ifdef USE_MPI
-  std::ifstream OptionFile(std::string(argv[1]) + "/infile" + mpi.RankString);
+  std::ifstream OptionFile((std::string(argv[1]) + "/infile" + mpi.RankString).c_str());
   OptionFile >> ProcessedFileName
              >> RawFileName
              >> OutFileName
