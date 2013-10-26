@@ -3,8 +3,11 @@
 #include "Constants.hh"
 #include "EXOUtilities/EXOWaveform.hh"
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
+
+#ifdef USE_PROCESSES
 #include <boost/date_time/posix_time/posix_time_types.hpp>
-#include <boost/thread/thread.hpp> 
+#include <boost/thread/thread.hpp>
+#endif
 
 #ifdef USE_PROCESSES
 #include <boost/mpi/communicator.hpp>
