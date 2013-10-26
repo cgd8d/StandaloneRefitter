@@ -111,6 +111,8 @@ class EXORefitSignals
   size_t fNumSignalsHandled;
   size_t fTotalIterationsDone;
 
+  typedef std::set<EventHandler*> EHSet;
+  EHSet fSaveToPushEH;
 #ifdef ENABLE_CHARGE
   // Wire digitization.
   EXODoubleWaveform fWireDeposit;

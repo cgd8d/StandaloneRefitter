@@ -53,6 +53,9 @@
 boost::mutex RootInterfaceMutex; // Mutex for processed event handling and everything that involves.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
 boost::mutex FFTWMutex; // EXOFastFourierTransformFFTW is not thread-safe; non-trivial to change.
+#ifdef USE_PROCESSES
+static boost::mutex SaveToPushMutex; // We can't use MPI across threads 
+#endif
 
 // And a mutex for writing debugging output from threaded parts of the code.
 boost::mutex CoutMutex;
@@ -1442,6 +1445,14 @@ void EXORefitSignals::DoPassThroughEvents()
 #endif
   }
 
+#if USE_PROCESSES
+  // We're serial here, don't lock
+  while (not fSaveToPushEH.empty()) {
+    EHSet::iterator it = fSaveToPushEH.begin();
+    FinishProcessedEvent(*it);
+    fSaveToPushEH.erase(it); 
+  }
+#endif
   DoPassWatch.Stop(DoPassTag);
 }
 
@@ -1520,8 +1531,10 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
   }
 
 #ifdef USE_PROCESSES
-  gMPIComm.send(gMPIComm.rank()+1, 0, *event);
-  delete event;
+  #ifdef USE_THREADS 
+  boost::mutex::scoped_lock sL(SaveToPushMutex); 
+  #endif
+  fSaveToPushEH.insert(event);
 #else
   fEventFinisher.QueueEvent(event);
 #endif

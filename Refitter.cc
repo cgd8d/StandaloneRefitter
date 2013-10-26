@@ -128,7 +128,7 @@ int main(int argc, char** argv)
   InputModule.SetFilename(ProcessedFileName);
   std::cout<<"Successfully set filename."<<std::endl;
 
-#ifdef USE_PROCESSES
+#if defined(USE_MPI) && defined(USE_PROCESSES)
   if(mpi.rank % 2 == 1) {
     // This is an io process.
     EventFinisher& finisher = EventFinisher::Get(InputModule, RawFileName, OutFileName);
