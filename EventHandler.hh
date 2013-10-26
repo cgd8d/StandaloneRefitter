@@ -7,6 +7,11 @@
 #include <map>
 #include <utility>
 
+#ifdef USE_PROCESSES
+#include <boost/serialization/vector.hpp>
+#include <boost/serialization/map.hpp>
+#endif
+
 struct EventHandler {
   // So we can grab the event again when we're done.
   Long64_t fEntryNumber;
@@ -62,6 +67,24 @@ struct EventHandler {
 
   // Where in the result matrix can we expect to find the required result?
   size_t fResultIndex;
+
+#ifdef USE_PROCESSES
+  friend class boost::serialization::access;
+  template <class Archive>
+  void serialize(Archive & ar, unsigned int) {
+    // Only serialize/unserialize the data structures we need in EventFinisher.
+    ar & fEntryNumber;
+    ar & fRunNumber;
+    ar & fEventNumber;
+    ar & fColumnLength;
+    ar & fNumSignals;
+    ar & fChannels;
+#ifdef USE_CHARGE
+    ar & fWireModel; // Only actually needed for its length.
+#endif
+    ar & fX;
+  }
+#endif
 };
 
 // We want to sort event handlers by file position; makes file reading much more efficient.
