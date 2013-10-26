@@ -33,28 +33,41 @@ Should be called like:
 #ifdef USE_MPI
 #include <fstream>
 #include <iomanip>
-#include <mpi.h>
+#include <boost/mpi/environment.hpp>
+#include <boost/mpi/communicator.hpp>
 // To control order of destruction -- we'd like for all function-static objects to be destroyed
 // before MPI_Finalize is called, so their destructors have a chance to execute side-effects.
 // Also redirect output properly at this stage.
 struct mpi_handler
 {
+  boost::mpi::environment env;
+  boost::mpi::communicator comm;
   int rank;
+  int numa_rank;
   std::string RankString;
   std::ofstream Output;
-  mpi_handler(int argc, char** argv) {
+  mpi_handler(int argc, char** argv) :
+  env(argc, argv)
+  {
     assert(argc >= 2);
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    std::ostringstream ProcessRankString;
-    ProcessRankString << std::setw(4) << std::setfill('0') << rank << ".txt";
-    RankString = ProcessRankString.str();
-    Output.open((std::string(argv[1]) + "/outfile" + RankString).c_str());
+    rank = comm.rank();
+#ifdef USE_PROCESSES
+    numa_rank = rank/2;
+#else
+    numa_rank = rank;
+#endif
+
+    // Make sure every rank has its own output file.
+    std::ostringstream OutFileName;
+    OutFileName << argv[1] << "/outfile" << std::setw(4) << std::setfill('0') << rank << ".txt";
+    Output.open(OutFileName.str().c_str());
     std::cout.rdbuf(Output.rdbuf()); // Redirect all output from this process to file.
     std::cerr.rdbuf(Output.rdbuf());
-  }
-  ~mpi_handler() {
-    MPI_Finalize();
+
+    // Make sure each numa_node reads in the proper input file.
+    std::ostringstream ProcessRankString;
+    ProcessRankString << std::setw(4) << std::setfill('0') << numa_rank << ".txt";
+    RankString = ProcessRankString.str();
   }
 };
 #else
@@ -114,9 +127,26 @@ int main(int argc, char** argv)
   std::cout<<"About to set filename."<<std::endl;
   InputModule.SetFilename(ProcessedFileName);
   std::cout<<"Successfully set filename."<<std::endl;
-  EventFinisher& finisher = EventFinisher::Get(InputModule, RawFileName, OutFileName);
 
-  EXORefitSignals RefitSig(finisher);
+#ifdef USE_PROCESSES
+  if(mpi.rank % 2 == 1) {
+    // This is an io process.
+    EventFinisher& finisher = EventFinisher::Get(InputModule, RawFileName, OutFileName);
+    finisher.Run();
+    return 0;
+  }
+  else {
+    // This is a compute process.
+#else
+  // We need both io and compute objects.
+  EventFinisher& finisher = EventFinisher::Get(InputModule, RawFileName, OutFileName);
+#endif
+
+  EXORefitSignals RefitSig
+#ifndef USE_PROCESSES
+    (finisher)
+#endif
+  ;
   EXOCalibManager::GetCalibManager().SetMetadataAccessType("text");
   RefitSig.SetNoiseFilename(NoiseFileName);
   RefitSig.SetRThreshold(Threshold);
@@ -132,7 +162,7 @@ int main(int argc, char** argv)
   std::cout<<"Using the boost::lockfree library."<<std::endl;
 #endif
 
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
   // Start a finish-up thread.
   boost::thread finishThread(&EventFinisher::Run, &finisher);
 #endif
@@ -141,6 +171,7 @@ int main(int argc, char** argv)
       NumEntries == -1 or entryNum < StartEntry + NumEntries;
       entryNum++) {
     if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
+#ifndef USE_PROCESSES
     if(entryNum % 100 == 0) {
 #ifdef USE_THREADS
       while(finisher.GetFinishEventQueueLength() > 5000) {
@@ -153,7 +184,8 @@ int main(int argc, char** argv)
       finisher.Run();
 #endif
     }
-#ifdef USE_THREADS
+#endif
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
     static SafeStopwatch GetLockWatch("Get lock in main (sequential)");
     SafeStopwatch::tag GetLockTag = GetLockWatch.Start();
     boost::mutex::scoped_lock locLock(RootInterfaceMutex);
@@ -167,7 +199,7 @@ int main(int argc, char** argv)
     static SafeStopwatch AcceptEventWatch("AcceptEvent (sequential)");
     SafeStopwatch::tag AcceptEventTag = AcceptEventWatch.Start();
     RefitSig.AcceptEvent(ED, entryNum
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
       , locLock
 #endif
     );
@@ -180,12 +212,17 @@ int main(int argc, char** argv)
   FlushEventsWatch.Stop(FlushEventsTag);
   static SafeStopwatch WaitForFinisherWatch("Waiting for events to be finished at the end (sequential)");
   SafeStopwatch::tag WaitForFinisherTag = WaitForFinisherWatch.Start();
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
   finisher.SetProcessingIsFinished();
   finishThread.join();
+#elif defined(USE_PROCESSES)
+  mpi.comm.send(mpi.rank+1, 1, EventHandler());
 #else
   finisher.Run();
 #endif
   WaitForFinisherWatch.Stop(WaitForFinisherTag);
+#ifdef USE_PROCESSES
+  }
+#endif
   WholeProgramWatch.Stop(WholeProgramTag);
 }

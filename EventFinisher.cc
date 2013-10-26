@@ -4,11 +4,16 @@
 #include "EXOUtilities/EXOWaveform.hh"
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
 
-#ifdef USE_THREADS
+#if defined(USE_THREADS) || defined(USE_PROCESSES)
 // So we can lower the priority of the FinishEvent thread.
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/resource.h>
+#endif
+
+#ifdef USE_PROCESSES
+#include <boost/mpi/communicator.hpp>
+static boost::mpi::communicator gMPIComm;
 #endif
 
 EventFinisher& EventFinisher::Get(EXOTreeInputModule& inputModule,
@@ -23,7 +28,7 @@ EventFinisher::EventFinisher(EXOTreeInputModule& inputModule, std::string RawFil
 : fVerbose(true),
   fInputModule(inputModule),
   fWaveformFile(RawFileName.c_str())
-#ifdef USE_THREADS
+#if defined(USE_THREADS) || defined(USE_PROCESSES)
   ,
   fDesiredQueueLength(2000),
   fProcessingIsDone(false)
@@ -125,7 +130,7 @@ void EventFinisher::FinishEvent(EventHandler* event)
 
     // Collect the fourier-transformed waveforms.  Save them split into real and complex parts.
     std::vector<EXODoubleWaveform> WF_real, WF_imag;
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
     FFTWMutex.lock();
 #endif
     for(size_t i = 0; i < event->fChannels.size(); i++) {
@@ -150,7 +155,7 @@ void EventFinisher::FinishEvent(EventHandler* event)
       for(size_t f = 0; f < fwf.GetLength(); f++) iwf[f] = fwf[f].imag();
       WF_imag.push_back(iwf);
     }
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
     FFTWMutex.unlock();
 #endif
 
@@ -170,7 +175,7 @@ void EventFinisher::FinishEvent(EventHandler* event)
     }
   } // End setting of denoised energy signals.
 
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
   boost::mutex::scoped_lock sL(RootInterfaceMutex);
 #endif
   FinishProcessedEvent(event, Results); // Deletes event.
@@ -181,27 +186,38 @@ void EventFinisher::Run()
   // Call FinishEvent repeatedly until the queue is empty.
   // When the queue is empty, either return or sleep until more events are available.
 
-#ifdef USE_THREADS
+#if defined(USE_THREADS) || defined(USE_PROCESSES)
   // Reduce thread priority -- we'd like for the threads which insert new events to get priority on the lock.
+  // If we're using single-threaded processes, same deal -- don't fight the other process.
   pid_t tid = syscall(SYS_gettid);
   int main_priority = getpriority(PRIO_PROCESS, tid);
   std::cout<<"FinishEventThread has priority "<<main_priority<<"; reducing to "<<main_priority+5<<std::endl;
   setpriority(PRIO_PROCESS, tid, main_priority+5);
 #endif
 
+#if defined(USE_THREADS) && defined(USE_PROCESSES)
+  boost::thread pull_data(&EventFinisher::ListenForArrivingEvents, this);
+#endif
+
   while(true) {
 #ifdef USE_THREADS
     boost::mutex::scoped_lock sL(fFinisherMutex);
+#endif
 
+#if defined(USE_THREADS) || defined(USE_PROCESSES)
     // Force ourselves to wait until the finish-events queue has a certain length (or processing is done).
     while(not fProcessingIsDone and
           fEventsToFinish.size() < fDesiredQueueLength) {
+#ifdef USE_THREADS
       fFinisherCondition.wait(sL);
+#else // USE_PROCESSES but not USE_THREADS -- we have to ask for another event within this thread.
+      ListenForArrivingEvents();
+#endif
     }
 #endif
     std::set<EventHandler*, CompareEventHandlerPtrs>::iterator it = fEventsToFinish.begin();
     if(it == fEventsToFinish.end()) {
-#ifdef USE_THREADS
+#if defined(USE_THREADS) || defined(USE_PROCESSES)
       // We assume only one io thread; in that case,
       // if we weren't woken because there were events to finish,
       // then we'd better have gotten here because processing is done.
@@ -239,3 +255,33 @@ size_t EventFinisher::GetFinishEventQueueLength()
 #endif
   return fEventsToFinish.size();
 }
+
+#ifdef USE_PROCESSES
+void EventFinisher::ListenForArrivingEvents()
+{
+#ifdef USE_THREADS
+  // Reduce thread priority -- we'd like for the threads which insert new events to get priority on the lock.
+  pid_t tid = syscall(SYS_gettid);
+  int main_priority = getpriority(PRIO_PROCESS, tid);
+  std::cout<<"FinishEventThread has priority "<<main_priority<<"; reducing to "<<main_priority+5<<std::endl;
+  setpriority(PRIO_PROCESS, tid, main_priority+5);
+
+  // If we're using threads, we'll busy-wait until done.
+  while (1)
+#endif // If we're not using threads, just receive once.
+  {
+    EventHandler* eh = new EventHandler;
+    boost::mpi::status s = gMPIComm.recv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
+    if(s.tag()) {
+#ifdef USE_THREADS
+      SetProcessingIsFinished();
+#else
+      ProcessingIsDone = true;
+#endif
+      delete eh;
+      break;
+    }
+    QueueEvent(eh);
+  }
+}
+#endif

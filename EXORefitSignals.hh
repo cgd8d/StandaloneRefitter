@@ -52,7 +52,11 @@ class EXORefitSignals
 {
  public:
   // Functions specified in the order they should be called.
-  EXORefitSignals(EventFinisher& finisher);
+  EXORefitSignals(
+#ifndef USE_PROCESSES
+    EventFinisher& finisher
+#endif
+  );
 
   void SetNoiseFilename(std::string name) { fNoiseFilename = name; }
   void SetLightmapFilename(std::string name) { fLightmapFilename = name; }
@@ -67,7 +71,7 @@ class EXORefitSignals
 
   int Initialize();
   void AcceptEvent(EXOEventData* ED, Long64_t entryNum
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
   , boost::mutex::scoped_lock& locLock
 #endif
    );
@@ -75,7 +79,9 @@ class EXORefitSignals
   ~EXORefitSignals();
 
  protected:
+#ifndef USE_PROCESSES
   EventFinisher& fEventFinisher;
+#endif
 
   // fNoiseCorrelations[f-MIN_F] stores the matrix of noise correlations at frequency f.
   // This matrix is a single contiguous array, ordered like:
@@ -124,6 +130,7 @@ class EXORefitSignals
   void PushAnEvent(EventHandler* evt);
 
   void PushFinishedEvent(EventHandler* event);
+  void FinishProcessedEvent(EventHandler* event);
 
   // Block BiCGSTAB algorithm.
   bool DoBlBiCGSTAB(EventHandler& event);

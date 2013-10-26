@@ -1,7 +1,7 @@
 # Makefile for linking against ROOT 
 # M. Marino 22 May 2007 
 
-SUPPORT_LIBS := -Wl,-Bstatic -lboost_thread -lboost_atomic -lboost_timer -lboost_chrono -lboost_system -lboost_serialization -Wl,-Bdynamic 
+SUPPORT_LIBS := -Wl,-Bstatic -lboost_thread -lboost_atomic -lboost_timer -lboost_chrono -lboost_system -lboost_mpi -lboost_serialization -Wl,-Bdynamic 
 ifeq ($(NERSC_HOST),)
   CXX := g++ -pthread
   EXO_LIBS :=-lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities
@@ -37,9 +37,9 @@ else
   endif
 endif
 
+PROCESS_MACROS := # -DUSE_PROCESSES
 
-
-CXXFLAGS := -O3 -DHAVE_TYPE_TRAITS=1 $(THREAD_MACROS) $(MPI_MACROS) \
+CXXFLAGS := -g -O3 -DHAVE_TYPE_TRAITS=1 $(THREAD_MACROS) $(MPI_MACROS) $(PROCESS_MACROS) \
              $(shell $(ROOTSYS)/bin/root-config --cflags) \
              -I$(shell exo-config --incdir) \
              -I$(BOOST_DIR)/include         \

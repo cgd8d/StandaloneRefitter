@@ -12,8 +12,10 @@
 
 #ifdef USE_THREADS
 #include <boost/thread/thread.hpp>
+#ifndef USE_PROCESSES
 extern boost::mutex RootInterfaceMutex;
 extern boost::mutex FFTWMutex;
+#endif
 #endif
 
 class EventFinisher
@@ -28,12 +30,16 @@ class EventFinisher
   void Run();
   size_t GetFinishEventQueueLength();
 
+#ifdef USE_PROCESSES
+  void ListenForArrivingEvents();
+#endif
+
 #ifdef USE_THREADS
   void SetProcessingIsFinished();
-
   boost::mutex fFinisherMutex;
   boost::condition_variable fFinisherCondition;
 #endif
+
   bool fVerbose;
  private:
   void FinishEvent(EventHandler* event);
@@ -45,7 +51,7 @@ class EventFinisher
   TTree* fWaveformTree;
   EXOWaveformData fWFData;
   std::set<EventHandler*, CompareEventHandlerPtrs> fEventsToFinish;
-#ifdef USE_THREADS
+#if defined(USE_THREADS) || defined(USE_PROCESSES)
   size_t fDesiredQueueLength;
   bool fProcessingIsDone;
 #endif

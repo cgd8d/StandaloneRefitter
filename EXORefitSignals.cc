@@ -65,7 +65,16 @@ boost::mutex EventResultsMutex;
 
 #endif
 
-EXORefitSignals::EXORefitSignals(EventFinisher& finisher)
+#ifdef USE_PROCESSES
+#include <boost/mpi/communicator.hpp>
+static boost::mpi::communicator gMPIComm;
+#endif
+
+EXORefitSignals::EXORefitSignals(
+#ifndef USE_PROCESSES
+  EventFinisher& finisher
+#endif
+)
 :
 #ifdef ENABLE_CHARGE
   fAPDsOnly(false),
@@ -74,7 +83,9 @@ EXORefitSignals::EXORefitSignals(EventFinisher& finisher)
   fVerbose(false),
   fDoRestarts(100),
   fNumMulsToAccumulate(500),
+#ifndef USE_PROCESSES
   fEventFinisher(finisher),
+#endif
   fLightmapFilename("data/lightmap/LightMaps.root"),
   fRThreshold(0.1),
 #ifdef USE_LOCKFREE
@@ -555,7 +566,7 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
 #endif
 
 void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
   , boost::mutex::scoped_lock& locLock
 #endif
   )
@@ -575,14 +586,14 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
 
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
-    fEventFinisher.FinishProcessedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
 
   // If the waveforms aren't full-length, skip for now (although we should be able to handle them later).
   if(ED->fEventHeader.fSampleCount != 2047) {
-    fEventFinisher.FinishProcessedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -590,7 +601,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
   // For now, we also only deal with events containing *exactly* one scintillation cluster.
   // There's nothing theoretical that warrants this; it's just easier to code up.
   if(ED->GetNumScintillationClusters() != 1) {
-    fEventFinisher.FinishProcessedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -606,7 +617,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
     FullClusters.push_back(clu);
   }
   if(FullClusters.empty()) {
-    fEventFinisher.FinishProcessedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -665,7 +676,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
     if(event->fExpectedYieldPerGang[fChannels[i]] > 1) HasYield = true;
   }
   if(not HasYield) {
-    fEventFinisher.FinishProcessedEvent(event);
+    FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
   }
@@ -765,7 +776,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
   } // (which we only did if we're handling wire signals.
   event->fNumSignals += event->fWireModel.size();
 #endif
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_PROCESSES)
   locLock.unlock(); // When locLock is destroyed, it will no longer auto release.
 #endif
 
@@ -1508,5 +1519,20 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
     }
   }
 
+#ifdef USE_PROCESSES
+  gMPIComm.send(gMPIComm.rank()+1, 0, *event);
+  delete event;
+#else
   fEventFinisher.QueueEvent(event);
+#endif
+}
+
+void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
+{
+#ifdef USE_PROCESSES
+  gMPIComm.send(gMPIComm.rank()+1, 0, *event);
+  delete event;
+#else
+  fEventFinisher.FinishProcessedEvent(event);
+#endif
 }
