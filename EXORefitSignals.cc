@@ -1547,6 +1547,8 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
 
 void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
 {
+  static SafeStopwatch watch("EXORefitSignals::FinishProcessedEvent (sequential)");
+  SafeStopwatch::tag tag = watch.Start();
 #ifdef USE_PROCESSES
   // boost::mpi would be convenient here for handling transmission of object.
   // However, edison currently does not provide it.  So we do it ourselves.
@@ -1566,4 +1568,5 @@ void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
 #else
   fEventFinisher.FinishProcessedEvent(event);
 #endif
+  watch.Stop(tag);
 }
