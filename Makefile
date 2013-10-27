@@ -1,7 +1,7 @@
 # Makefile for linking against ROOT 
 # M. Marino 22 May 2007 
 
-SUPPORT_LIBS := -Wl,-Bstatic -lboost_thread -lboost_atomic -lboost_timer -lboost_chrono -lboost_system -lboost_mpi -lboost_serialization -Wl,-Bdynamic 
+SUPPORT_LIBS := -Wl,-Bstatic -lboost_thread -lboost_atomic -lboost_timer -lboost_chrono -lboost_system -lboost_serialization -Wl,-Bdynamic 
 ifeq ($(NERSC_HOST),)
   CXX := g++ -pthread
   EXO_LIBS :=-lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities
