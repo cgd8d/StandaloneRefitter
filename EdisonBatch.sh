@@ -16,7 +16,7 @@ SOCAT_PORT=`$PBS_O_WORKDIR/GetSocatPort.sh`
 socatpid=$!
 echo "We will communicate through $HOST:$SOCAT_PORT; socat has pid $socatpid."
 
-aprun -n 2 -S 1 -d 12 -ss -cc numa_node $PBS_O_WORKDIR/Refitter $SCRATCH/LightOnly/InOutFiles $HOST:$SOCAT_PORT &
+aprun -n 4 -S 2 -ss -cc numa_node $PBS_O_WORKDIR/Refitter $SCRATCH/LightOnly/InOutFiles $HOST:$SOCAT_PORT &
 pid=$!
 
 trap "echo 'user requested termination'; kill -USR1 $pid" USR1
