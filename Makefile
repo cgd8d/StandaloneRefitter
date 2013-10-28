@@ -78,9 +78,9 @@ all: $(TARGETS)
 ifeq ($(BUILD_STATIC),yes)
 	@echo "   Special static build"
 	@$(eval $@_WE := $(shell ./.wrapexecuteCC $(LDFLAGS) $(filter-out $(EXTRA_LD_DEPS),$^) -o $@ $(LIBS) -Wl,-Bstatic))
-	@$(eval $@_LD := $(subst ORIGIN_FLAG,$(ORIGIN_FLAG),$(filter-out -lpthread,$($@_WE))))
+	@$(eval $@_LD := $(subst ORIGIN_FLAG,$(ORIGIN_FLAG),$(filter-out -lpthread,$(filter-out -lrt, $($@_WE)))))
 	@$($@_LD) -lugni -lpmi -lalpslli -lalpsutil -lalps -ludreg \
-           -ldmapp -lxpmem -Wl,-Bdynamic -lc -lpthread
+           -ldmapp -lxpmem -Wl,-Bdynamic -lc -lpthread -lrt
 else
 	@$(LD) $(LDFLAGS) $(filter-out $(EXTRA_LD_DEPS), $^) -o $@ $(LIBS)
 endif
