@@ -77,4 +77,7 @@ clean:
 	@echo "Building dependencies"
 	@$(CXX) -M $(CXXFLAGS) $^ > $@ 
 
+
+ifneq ($(MAKECMDGOALS),clean)
 -include .depend
+endif
