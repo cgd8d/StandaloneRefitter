@@ -104,7 +104,7 @@ clean:
 
 .wraplinuxCC: .wrapCC
 	@$(eval $@_temp := $(shell ./$^ -c temp.C | awk '{ print $$1 }'))
-	@cp $($@_temp) $@
+	@cp `which $($@_temp)` $@
 	@sed -i 's/\($$CRAY_PREPROCESSOR \)/echo \1/g' $@
 
 .wrapexecuteCC : .wraplinuxCC .wrapCC
