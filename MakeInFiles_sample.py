@@ -13,7 +13,7 @@ import glob
 import ROOT
 ROOT.gSystem.Load("libEXOUtilities")
 
-ProcsPerJob = 100
+ProcsPerJob = [8, 20] + [100]*1000 # Start with a couple of small jobs, followed by bigger ones.
 DenoisedOutDir = "/scratch1/scratchdirs/claytond/LightOnly"
 
 NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles"
@@ -28,17 +28,18 @@ def GetNoiseFile(runNo):
     raise ValueError("No noise file for run %i." % runNo)
 
 ProcDataset = ROOT.EXORunInfoManager.GetDataSet("Data/Processed/masked",
-                                                "run>=2464&&run<=5367")
+                                                "run>=2464&&run<=5367&&runType==\"Data-Source calibration\"")
 
 def JobForProc(procFile, runNo):
     FileParts = procFile.split('/')[-6:]
     FileBase = FileParts[-1][-17:]
-    RawFileParts = FileParts
-    RawFileParts[3] = 'root'
-    RawFileParts[-1] = 'run' + FileBase
+    xrootd_procfile = '/' + '/'.join(FileParts)
+    FileParts[-3] = 'root'
+    FileParts[-1] = 'run' + FileBase
+    xrootd_rawfile = '/' + '/'.join(FileParts)
     return ("%s\n%s\n%s\n%s\n%i\n%i\n%f\n" %
-            ('/' + '/'.join(FileParts), # Processed file
-             '/' + '/'.join(RawFileParts), # Raw file
+            (xrootd_procfile, # Processed file
+             xrootd_rawfile, # Raw file
              "%s/%i/denoised%s" % (DenoisedOutDir, runNo, FileBase), # Out file
              GetNoiseFile(runNo), # noise file
              0, -1, 0.1)) # Run parameters
@@ -53,6 +54,7 @@ for runInfo in ProcDataset:
             numEntries = runFile.FindMetaData("eventCount").AsInt()
             ProcsToInsert.append((numEntries, Job))
         ProcList += ProcsToInsert
+        OutRunList.append(runInfo.GetRunNumber())
         print "Added jobs for run %i." % runInfo.GetRunNumber()
     except ValueError, exc:
         print "Failed to add jobs for run %i: %s." % (runInfo.GetRunNumber(), exc.message)
@@ -63,7 +65,8 @@ ProcList.sort(key = lambda x: x[0])
 JobIndex = 0
 while len(ProcList) > 0:
     ProcsInThisJob = []
-    for i in xrange(ProcsPerJob):
+    NumProcsInThisJob = ProcsPerJob.pop(0)
+    for i in xrange(NumProcsInThisJob):
         if len(ProcList) > 0: ProcsInThisJob.append(ProcList.pop()[1])
     try:
         os.mkdir('Job%04i' % JobIndex)
@@ -74,3 +77,9 @@ while len(ProcList) > 0:
             infile.write(ProcsInThisJob[i])
     JobIndex += 1
 
+# We run this script at SLAC, and the necessary output folders may not exist -- print the command to run.
+print 'To create the necessary output folders, run \'bash MakeOutDirs.sh\''
+with open('MakeOutDirs.sh', 'w') as make_out_dirs:
+    make_out_dirs.write('#!/bin/bash\n')
+    make_out_dirs.write('mkdir -p ' +
+                        ' '.join(map(lambda x: os.path.join(DenoisedOutDir, str(x)), OutRunList)))
