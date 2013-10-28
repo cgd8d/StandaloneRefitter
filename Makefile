@@ -6,7 +6,7 @@ ifeq ($(NERSC_HOST),)
   CXX := g++ -pthread
   EXO_LIBS :=-lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities
   THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=4 -DUSE_LOCKFREE
-  FFTW_DIR := $(shell $(ROOTSYS)/bin/root-config --libdir)
+  FFTW_LDFLAGS := -L$(shell $(ROOTSYS)/bin/root-config --libdir)
   ROOT_LIBS := -lRIO -lHist -lGraf -lTree -lNet -lXMLParser -lGpad -lTreePlayer
   MKL_CFLAGS := -mkl
   MKL_LIBFLAGS := -mkl
@@ -19,7 +19,7 @@ else
 
   #ROOT_LIBS := -lRoot -Wl,-Bdynamic -lNetx -lXrdClient -Wl,-Bstatic -lpcre -lfreetype
   ROOT_LIBS := -Wl,-Bdynamic -lRIO -lHist -lGraf -lTree -lNet -lGpad -lTreePlayer \
-               -lNetx -lXrdClient -lCore -lMathCore -lMatrix -lThread \
+               -lNetx -lXrdClient -lXrdUtils -lCore -lMathCore -lMatrix -lThread \
                -lCint -lGraf3d -lPhysics -lMinuit -lm -ldl -Wl,-Bstatic
   XROOTD_LIBFLAGS := -L/global/project/projectdirs/exo200/software/lib/xrootd/3.3.4/lib
   MPI_MACROS :=-DUSE_MPI
@@ -47,7 +47,7 @@ CXXFLAGS := -g -O3 -DHAVE_TYPE_TRAITS=1 $(THREAD_MACROS) $(MPI_MACROS) $(PROCESS
 
 LDFLAGS := -L$(shell $(ROOTSYS)/bin/root-config --libdir) $(XROOTD_LIBFLAGS) \
            -L$(shell exo-config --libdir)                 \
-           -L$(FFTW_DIR)                                  \
+           $(FFTW_LDFLAGS)                                \
            -L$(BOOST_LIB) $(MKL_LIBFLAGS)
 LIBS := $(EXO_LIBS) $(ROOT_LIBS) $(SUPPORT_LIBS) $(MKL_LIBS)
              
