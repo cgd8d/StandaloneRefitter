@@ -52,6 +52,7 @@ void EventFinisher::QueueEvent(EventHandler* eventHandler)
   boost::mutex::scoped_lock sL(fFinisherMutex);
 #endif
   fEventsToFinish.insert(eventHandler);
+  if(fVerbose) std::cout<<"Queued an entry; queue length is "<<fEventsToFinish.size()<<std::endl;
 #ifdef USE_THREADS
   assert(not fProcessingIsDone); // Certainly shouldn't be done, if we got here.
   if(fEventsToFinish.size() >= fDesiredQueueLength) fFinisherCondition.notify_one();
