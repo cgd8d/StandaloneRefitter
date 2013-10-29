@@ -13,7 +13,7 @@ import glob
 import ROOT
 ROOT.gSystem.Load("libEXOUtilities")
 
-ProcsPerJob = [8, 20] + [100]*1000 # Start with a couple of small jobs, followed by bigger ones.
+ProcsPerJob = [2, 6] + [20]*1000 # Start with a couple of small jobs, followed by bigger ones.
 DenoisedOutDir = "/scratch1/scratchdirs/claytond/LightOnly"
 
 NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles"
