@@ -5,11 +5,13 @@
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
 
 #ifdef USE_PROCESSES
-#include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/thread/thread.hpp>
 #endif
 
 #ifdef USE_PROCESSES
+#include <boost/interprocess/sync/named_semaphore.hpp>
+#include <boost/interprocess/creation_tags.hpp>
+#include <sstream>
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
 #endif
@@ -268,18 +270,21 @@ size_t EventFinisher::GetFinishEventQueueLength()
 #ifdef USE_PROCESSES
 void EventFinisher::ListenForArrivingEvents()
 {
+  std::ostringstream SemaphoreName;
+  SemaphoreName << "IOSemaphore_" << gMPIComm.rank()-1;
+  static boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
+                                                          SemaphoreName.str().c_str(),
+                                                          0);
 #ifdef USE_THREADS
-  // If we're using threads, we'll busy-wait until done.
+  // If we're using threads, we'll wait until done.
   while (1)
 #endif // If we're not using threads, just receive once.
   {
     EventHandler* eh = new EventHandler;
-    boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
-    boost::optional<boost::mpi::status> s; 
-    while ( ! (s = req.test()) ) {
-      boost::this_thread::sleep(boost::posix_time::millisec(1));
-    }
-    if(s->tag()) {
+    IOSemaphore.wait();
+    boost::mpi::status s = gMPIComm.recv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
+    if(s.tag()) {
+      boost::interprocess::named_semaphore::remove(SemaphoreName.str().c_str());
 #ifdef USE_THREADS
       SetProcessingIsFinished();
 #else

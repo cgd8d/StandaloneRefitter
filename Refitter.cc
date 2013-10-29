@@ -30,6 +30,12 @@ Should be called like:
 #include <boost/chrono/duration.hpp>
 #endif
 
+#ifdef USE_PROCESSES
+#include <boost/interprocess/sync/named_semaphore.hpp>
+#include <boost/interprocess/creation_tags.hpp>
+#include <sstream>
+#endif
+
 #ifdef USE_MPI
 #include <fstream>
 #include <iomanip>
@@ -227,8 +233,14 @@ int main(int argc, char** argv)
   finisher.SetProcessingIsFinished();
   finishThread.join();
 #elif defined(USE_PROCESSES)
-  mpi.comm.send(mpi.rank+1, 1, EventHandler());
   // Send a message with a non-zero tag -- the payload is unimportant.
+  std::ostringstream SemaphoreName;
+  SemaphoreName << "IOSemaphore_" << mpi.rank;
+  boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
+                                                   SemaphoreName.str().c_str(),
+                                                   0);
+  IOSemaphore.post();
+  mpi.comm.send(mpi.rank+1, 1, EventHandler());
 #else
   finisher.Run();
 #endif

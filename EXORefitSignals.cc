@@ -63,6 +63,8 @@ boost::mutex CoutMutex;
 #endif
 
 #ifdef USE_PROCESSES
+#include <boost/interprocess/sync/named_semaphore.hpp>
+#include <boost/interprocess/creation_tags.hpp>
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
 #endif
@@ -1508,6 +1510,12 @@ void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
   static SafeStopwatch watch("EXORefitSignals::FinishProcessedEvent (sequential)");
   SafeStopwatch::tag tag = watch.Start();
 #ifdef USE_PROCESSES
+  std::ostringstream SemaphoreName;
+  SemaphoreName << "IOSemaphore_" << gMPIComm.rank();
+  static boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
+                                                          SemaphoreName.str().c_str(),
+                                                          0);
+  IOSemaphore.post();
   gMPIComm.send(gMPIComm.rank()+1, 0, *event);
   delete event;
 #else
