@@ -8,7 +8,7 @@ if [ -z "$NERSC_HOST" ]; then
 	# Running at SLAC.
 	export CXX='g++ -pthread'
 	export EXO_LIBS="-lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities"
-	export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=4 -DUSE_LOCKFREE"
+	export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=4"
 	export FFTW_DIR=`root-config --libdir`
 	export ROOT_LIBS="-lRIO -lHist -lGraf -lTree -lNet -lXMLParser -lGpad -lTreePlayer"
 else
@@ -18,9 +18,9 @@ else
 	export ROOT_LIBS="-lRIO -lHist -lGraf -lTree -lNet -lGpad -lTreePlayer -lNetx -lXrdClient -lCore -lMathCore -lMatrix -lThread -lCint -lGraf3d"
 	export MPI_MACROS="-DUSE_MPI"
 	if [ "$NERSC_HOST" = "hopper" ]; then
-		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6 -DUSE_LOCKFREE"
+		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6"
 	elif [ "$NERSC_HOST" = "edison" ]; then
-		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=12 -DUSE_LOCKFREE"
+		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=12"
 	else
 		echo "No match to nersc host."
 		exit 1

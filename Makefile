@@ -11,7 +11,7 @@ SUPPORT_LIBS := -Wl,-Bstatic -lboost_thread -lboost_atomic -lboost_timer -lboost
 ifeq ($(NERSC_HOST),)
   CXX := g++ -pthread
   EXO_LIBS :=-lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities
-  THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=4 -DUSE_LOCKFREE
+  THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=4
   FFTW_LDFLAGS := -L$(shell $(ROOTSYS)/bin/root-config --libdir)
   ROOT_LIBS := -lRIO -lHist -lGraf -lTree -lNet -lXMLParser -lGpad -lTreePlayer
   MKL_CFLAGS := -mkl
@@ -37,11 +37,11 @@ else
      FINAL_LD_FLAG := -Wl,-rpath,ORIGIN_FLAG
   endif
   ifeq ($(NERSC_HOST),hopper)
-     THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=6 -DUSE_LOCKFREE
+     THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=6
      MKL_CFLAGS := -mkl
      MKL_LIBFLAGS := -mkl
   else ifeq ($(NERSC_HOST),edison)
-     THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=12 -DUSE_LOCKFREE
+     THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=12
      MKL_CFLAGS := -I$(MKL_INC)
      MKL_LIBFLAGS := -L$(MKL_LIBDIR)
   else

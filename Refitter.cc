@@ -158,9 +158,6 @@ int main(int argc, char** argv)
 #else
   std::cout<<"Sequential code."<<std::endl;
 #endif
-#ifdef USE_LOCKFREE
-  std::cout<<"Using the boost::lockfree library."<<std::endl;
-#endif
 
 #if defined(USE_THREADS) && !defined(USE_PROCESSES)
   // Start a finish-up thread.

@@ -60,12 +60,6 @@ static boost::mutex SaveToPushMutex; // We can't use MPI across threads
 // And a mutex for writing debugging output from threaded parts of the code.
 boost::mutex CoutMutex;
 
-#ifndef USE_LOCKFREE
-// We'll need additional mutexes to protect our event queues.
-boost::mutex EventQueueMutex;
-boost::mutex EventResultsMutex;
-#endif
-
 #endif
 
 #ifdef USE_PROCESSES
@@ -91,10 +85,8 @@ EXORefitSignals::EXORefitSignals(
 #endif
   fLightmapFilename("data/lightmap/LightMaps.root"),
   fRThreshold(0.1),
-#ifdef USE_LOCKFREE
   fEventHandlerQueue(0), // The default lockfree constructor is not allowed.
   fEventHandlerResults(0), // http://boost.2283326.n4.nabble.com/lockfree-Faulty-static-assert-td4635029.html
-#endif
   fNumVectorsInQueue(0)
 {
 }
@@ -839,13 +831,8 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
   fNumSignalsHandled += event->fNumSignals;
 
   // Push event onto the list of event handlers.
-#ifdef USE_LOCKFREE
   assert(fEventHandlerQueue.unsynchronized_push(event));
-#else
-  fEventHandlerQueue.push(event);
-#endif
 
-#ifdef USE_LOCKFREE
   // Ensure that fEventHandlerResults has enough nodes reserved to accept all of the queued events.
   // Unfortunately, the only way I know to do this is really awkward.
   assert(fEventHandlerResults.empty());
@@ -859,7 +846,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
     assert(fEventHandlerResults.unsynchronized_pop(evt));
     assert(fEventHandlerQueue.unsynchronized_push(evt));
   }
-#endif
   BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
 
   // Now, while there are enough requests in the queue, satisfy those requests.
@@ -1344,18 +1330,7 @@ EventHandler* EXORefitSignals::PopAnEvent()
   // Return an event to process, or NULL if there isn't one.
   // Make sure this is thread-safe.
   EventHandler* evt = NULL;
-#ifdef USE_LOCKFREE
   if(not fEventHandlerQueue.pop(evt)) evt = NULL;
-#else
-#ifdef USE_THREADS
-  boost::mutex::scoped_lock sL(EventQueueMutex);
-#endif
-  if(fEventHandlerQueue.empty()) evt = NULL;
-  else {
-    evt = fEventHandlerQueue.front();
-    fEventHandlerQueue.pop();
-  }
-#endif
   return evt;
 }
 
@@ -1363,15 +1338,8 @@ void EXORefitSignals::PushAnEvent(EventHandler* evt)
 {
   // Push an event requiring further processing.
   // Make sure this is thread-safe.
-#ifdef USE_LOCKFREE
   // We should have already allocated sufficient space.  (Else, it's not really thread-safe.)
   assert(fEventHandlerResults.bounded_push(evt));
-#else
-#ifdef USE_THREADS
-  boost::mutex::scoped_lock sL(EventResultsMutex);
-#endif
-  fEventHandlerResults.push(evt);
-#endif
 }
 
 void EXORefitSignals::HandleEventsInThread()
@@ -1435,14 +1403,9 @@ void EXORefitSignals::DoPassThroughEvents()
 
   // Transfer entries from results into queue.
   while(not fEventHandlerResults.empty()) {
-#ifdef USE_LOCKFREE
     EventHandler* evt = NULL;
     assert(fEventHandlerResults.unsynchronized_pop(evt));
     assert(fEventHandlerQueue.unsynchronized_push(evt));
-#else
-    fEventHandlerQueue.push(fEventHandlerResults.front());
-    fEventHandlerResults.pop();
-#endif
   }
 
 #ifdef USE_PROCESSES

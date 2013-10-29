@@ -36,17 +36,10 @@ class EXOUWireSignal;
 class EXOTransferFunction;
 #endif
 
-#ifdef USE_LOCKFREE
 // Use a lock-free queue so that multiple threads can push and pop events to be handled without a manager.
 #pragma warning(disable:488)  // icc spits out alot of warnings because of the boost header
 #include <boost/lockfree/queue.hpp>
 typedef boost::lockfree::queue<EventHandler*> queue_type;
-#else
-// If we're threading, we'll have to use regular locks around a regular queue.
-// If we're not threading, of course just use a queue anyway.
-#include <queue>
-typedef std::queue<EventHandler*> queue_type;
-#endif
 
 class EXORefitSignals
 {
