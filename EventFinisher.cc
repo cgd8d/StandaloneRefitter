@@ -284,7 +284,9 @@ void EventFinisher::ListenForArrivingEvents()
     IOSemaphore.wait();
     boost::mpi::status s = gMPIComm.recv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
     if(s.tag()) {
-      boost::interprocess::named_semaphore::remove(SemaphoreName.str().c_str());
+      if(fVerbose) std::cout<<"Removing the named semaphore from the system."<<std::endl;
+      bool success = boost::interprocess::named_semaphore::remove(SemaphoreName.str().c_str());
+      assert(success);
 #ifdef USE_THREADS
       SetProcessingIsFinished();
 #else
