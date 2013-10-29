@@ -64,7 +64,7 @@ LDFLAGS := -L$(shell $(ROOTSYS)/bin/root-config --libdir) $(XROOTD_LIBFLAGS) \
 
 LIBS := $(EXO_LIBS) $(ROOT_LIBS) $(SUPPORT_LIBS) $(MKL_LIBS)
              
-TARGETS := Refitter ConvertNoiseFile 
+TARGETS := Refitter 
 SOURCES := $(wildcard *.cc) #uncomment these to add all cc files in directory to your compile list 
 
 
@@ -77,7 +77,7 @@ all: $(TARGETS)
 	@echo "Building .......... $@"
 ifeq ($(BUILD_STATIC),yes)
 	@echo "   Special static build"
-	@$(eval $@_WE := $(shell ./.wrapexecuteCC $(LDFLAGS) $(filter-out $(EXTRA_LD_DEPS),$^) -o $@ $(LIBS) -Wl,-Bstatic))
+	@$(eval $@_WE := $(shell ./.wrapexecuteCC -dynamic $(LDFLAGS) $(filter-out $(EXTRA_LD_DEPS),$^) -o $@ $(LIBS) -Wl,-Bstatic))
 	@$(eval $@_LD := $(subst ORIGIN_FLAG,$(ORIGIN_FLAG),$(filter-out -lpthread,$(filter-out -lrt, $($@_WE)))))
 	@$($@_LD) -lugni -lpmi -lalpslli -lalpsutil -lalps -ludreg \
            -ldmapp -lxpmem -Wl,-Bdynamic -lc -lpthread -lrt
