@@ -16,7 +16,6 @@ Should be called like:
 
 #include "EXORefitSignals.hh"
 #include "EventFinisher.hh"
-#include "MPI_Helper.hh"
 #include "EXOUtilities/EXOEventData.hh"
 #include "EXOCalibUtilities/EXOCalibManager.hh"
 #include "EXOAnalysisManager/EXOTreeInputModule.hh"
@@ -34,21 +33,24 @@ Should be called like:
 #ifdef USE_MPI
 #include <fstream>
 #include <iomanip>
-#include "mpi.h"
+#include <boost/mpi/environment.hpp>
+#include <boost/mpi/communicator.hpp>
 // To control order of destruction -- we'd like for all function-static objects to be destroyed
 // before MPI_Finalize is called, so their destructors have a chance to execute side-effects.
 // Also redirect output properly at this stage.
 struct mpi_handler
 {
+  boost::mpi::environment env;
+  boost::mpi::communicator comm;
   int rank;
   int numa_rank;
   std::string RankString;
   std::ofstream Output;
-  mpi_handler(int argc, char** argv)
+  mpi_handler(int argc, char** argv) :
+  env(argc, argv)
   {
     assert(argc >= 2);
-    MPI_CHECK_RESULT(MPI_Init, (&argc, &argv));
-    MPI_CHECK_RESULT(MPI_Comm_rank, (MPI_COMM_WORLD, &rank));
+    rank = comm.rank();
 #ifdef USE_PROCESSES
     numa_rank = rank/2;
 #else
@@ -66,9 +68,6 @@ struct mpi_handler
     std::ostringstream ProcessRankString;
     ProcessRankString << std::setw(4) << std::setfill('0') << numa_rank << ".txt";
     RankString = ProcessRankString.str();
-  }
-  ~mpi_handler() {
-    MPI_CHECK_RESULT(MPI_Finalize, ());
   }
 };
 #else
@@ -217,8 +216,8 @@ int main(int argc, char** argv)
   finisher.SetProcessingIsFinished();
   finishThread.join();
 #elif defined(USE_PROCESSES)
+  mpi.comm.send(mpi.rank+1, 1, EventHandler());
   // Send a message with a non-zero tag -- the payload is unimportant.
-  MPI_CHECK_RESULT(MPI_Send, (NULL, 0, MPI_UNSIGNED_LONG, mpi.rank+1, 1, MPI_COMM_WORLD));
 #else
   finisher.Run();
 #endif

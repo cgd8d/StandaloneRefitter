@@ -10,13 +10,8 @@
 #endif
 
 #ifdef USE_PROCESSES
-/* edison does not (currently) provide boost::mpi
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
-*/
-#include "mpi.h"
-#include "MPI_Helper.hh"
-#include <boost/archive/binary_iarchive.hpp>
 #endif
 
 EventFinisher& EventFinisher::Get(EXOTreeInputModule& inputModule,
@@ -258,38 +253,21 @@ void EventFinisher::ListenForArrivingEvents()
   while (1)
 #endif // If we're not using threads, just receive once.
   {
-    /* edison does not provide boost::mpi. So, do this ourselves for now.
+    EventHandler* eh = new EventHandler;
     boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
     boost::optional<boost::mpi::status> s; 
-    */
-    int rank;
-    MPI_CHECK_RESULT(MPI_Comm_rank, (MPI_COMM_WORLD, &rank));
-    unsigned long int size;
-    MPI_Status mpi_status;
-    // Get the size of the upcoming message.
-    MPI_CHECK_RESULT(MPI_Recv, (reinterpret_cast<void*>(&size), 1, MPI_UNSIGNED_LONG, rank-1, \
-                                MPI_ANY_TAG, MPI_COMM_WORLD, &mpi_status));
-    if(mpi_status.MPI_TAG) {
+    while ( ! (s = req.test()) ) {
+      boost::this_thread::sleep(boost::posix_time::millisec(1));
+    }
+    if(s->tag()) {
 #ifdef USE_THREADS
       SetProcessingIsFinished();
 #else
       ProcessingIsDone = true;
 #endif
+      delete eh;
       break;
     }
-    // Get the actual payload.
-    std::vector<char> buffer(size);
-    MPI_CHECK_RESULT(MPI_Recv, (reinterpret_cast<void*>(&buffer[0]), size, MPI_PACKED, rank-1, \
-                                MPI_ANY_TAG, MPI_COMM_WORLD, &mpi_status));
-    int received_count;
-    MPI_CHECK_RESULT(MPI_Get_count, (&mpi_status, MPI_PACKED, &received_count));
-    assert(received_count == size);
-    // Transfer it into a new event handler.
-    EventHandler* eh = new EventHandler;
-    std::istringstream istream;
-    istream.rdbuf()->pubsetbuf(&buffer[0], size);
-    boost::archive::binary_iarchive iarchive(istream, boost::archive::no_header);
-    iarchive >> *eh;
     QueueEvent(eh);
   }
 }

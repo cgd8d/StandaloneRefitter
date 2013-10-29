@@ -69,13 +69,8 @@ boost::mutex EventResultsMutex;
 #endif
 
 #ifdef USE_PROCESSES
-/* edison does not (currently) provide boost::mpi
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
-*/
-#include "mpi.h"
-#include "MPI_Helper.hh"
-#include <boost/archive/binary_oarchive.hpp>
 #endif
 
 EXORefitSignals::EXORefitSignals(
@@ -1550,20 +1545,7 @@ void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
   static SafeStopwatch watch("EXORefitSignals::FinishProcessedEvent (sequential)");
   SafeStopwatch::tag tag = watch.Start();
 #ifdef USE_PROCESSES
-  // boost::mpi would be convenient here for handling transmission of object.
-  // However, edison currently does not provide it.  So we do it ourselves.
-  // gMPIComm.send(gMPIComm.rank()+1, 0, *event); // with boost::mpi, this takes care of everything.
-  // This is a little inefficient with multiple copies; on the other hand,
-  // if it is a bottleneck then we should start using shared memory anyway.
-  std::ostringstream ostream;
-  boost::archive::binary_oarchive oarchive(ostream, boost::archive::no_header);
-  oarchive << *event;
-  std::string ostring = ostream.str();
-  int rank;
-  MPI_CHECK_RESULT(MPI_Comm_rank, (MPI_COMM_WORLD, &rank));
-  unsigned long int size = ostring.size();
-  MPI_CHECK_RESULT(MPI_Send, (reinterpret_cast<void*>(&size), 1, MPI_UNSIGNED_LONG, rank+1, 0, MPI_COMM_WORLD));
-  MPI_CHECK_RESULT(MPI_Send, (reinterpret_cast<void*>(&ostring[0]), size, MPI_PACKED, rank+1, 0, MPI_COMM_WORLD));
+  gMPIComm.send(gMPIComm.rank()+1, 0, *event);
   delete event;
 #else
   fEventFinisher.FinishProcessedEvent(event);
