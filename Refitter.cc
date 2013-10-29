@@ -133,6 +133,7 @@ int main(int argc, char** argv)
     // This is an io process.
     EventFinisher& finisher = EventFinisher::Get(InputModule, RawFileName, OutFileName);
     finisher.Run();
+    WholeProgramWatch.Stop(WholeProgramTag);
     return 0;
   }
   else {
