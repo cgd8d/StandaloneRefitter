@@ -180,7 +180,17 @@ int main(int argc, char** argv)
       NumEntries == -1 or entryNum < StartEntry + NumEntries;
       entryNum++) {
     if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
-#ifndef USE_PROCESSES
+
+    // Don't let computation get too far ahead of io, or we'll run out of memory.
+    static SafeStopwatch StallingWatch("Stalling in main thread (sequential)");
+    SafeStopwatch::tag StallingTag = StallingWatch.Start();
+#ifdef USE_PROCESSES
+    if(req.test()) { // We've been asked to pause.
+      std::cout<<"Stalling the computation threads for FinishEvent to catch up."<<std::endl;
+      mpi.comm.recv(mpi.rank+1, 0); // Wait until we get the go-ahead.
+      req = mpi.comm.irecv(mpi.rank+1, 1); // Back to a passive wait for problems.
+    }
+#else
     if(entryNum % 100 == 0) {
 #ifdef USE_THREADS
       while(finisher.GetFinishEventQueueLength() > 5000) {
@@ -194,13 +204,7 @@ int main(int argc, char** argv)
 #endif
     }
 #endif
-#ifdef USE_PROCESSES
-    if(req.test()) { // We've been asked to pause.
-      std::cout<<"Stalling the computation threads for FinishEvent to catch up."<<std::endl;
-      mpi.comm.recv(mpi.rank+1, 0); // Wait until we get the go-ahead.
-      req = mpi.comm.irecv(mpi.rank+1, 1); // Back to a passive wait for problems.
-    }
-#endif
+    StallingWatch.Stop(StallingTag);
 
 #if defined(USE_THREADS) && !defined(USE_PROCESSES)
     static SafeStopwatch GetLockWatch("Get lock in main (sequential)");
