@@ -165,6 +165,11 @@ int main(int argc, char** argv)
   boost::thread finishThread(&EventFinisher::Run, &finisher);
 #endif
 
+#ifdef USE_PROCESSES
+  // Put out a continuing non-blocking request for messages from the io process.
+  boost::mpi::request req = mpi.comm.irecv(mpi.rank+1, 1);
+#endif
+
   for(Long64_t entryNum = StartEntry;
       NumEntries == -1 or entryNum < StartEntry + NumEntries;
       entryNum++) {
@@ -183,6 +188,14 @@ int main(int argc, char** argv)
 #endif
     }
 #endif
+#ifdef USE_PROCESSES
+    if(req.test()) { // We've been asked to pause.
+      std::cout<<"Stalling the computation threads for FinishEvent to catch up."<<std::endl;
+      mpi.comm.recv(mpi.rank+1, 0); // Wait until we get the go-ahead.
+      req = mpi.comm.irecv(mpi.rank+1, 1); // Back to a passive wait for problems.
+    }
+#endif
+
 #if defined(USE_THREADS) && !defined(USE_PROCESSES)
     static SafeStopwatch GetLockWatch("Get lock in main (sequential)");
     SafeStopwatch::tag GetLockTag = GetLockWatch.Start();

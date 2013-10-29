@@ -189,9 +189,28 @@ void EventFinisher::Run()
   boost::thread pull_data(&EventFinisher::ListenForArrivingEvents, this);
 #endif
 
+#ifdef USE_PROCESSES
+  bool HasAskedForPause = false;
+#endif
+
   while(true) {
 #ifdef USE_THREADS
     boost::mutex::scoped_lock sL(fFinisherMutex);
+#endif
+
+#ifdef USE_PROCESSES
+    // If we ever get behind, we need the ability to ask the compute process to pause for a bit.
+    // When we get caught up, we permit it to continue.
+    if(HasAskedForPause and fEventsToFinish.size() < 4000) {
+      if(fVerbose) std::cout<<"Letting the compute process know that it can continue."<<std::endl;
+      gMPIComm.send(gMPIComm.rank() - 1, 0); // OK for compute process to continue.
+      HasAskedForPause = false;
+    }
+    if(not HasAskedForPause and fEventsToFinish.size() > 5000) {
+      if(fVerbose) std::cout<<"Asking the compute process to pause for a bit."<<std::endl;
+      gMPIComm.send(gMPIComm.rank() - 1, 1); // Please be merciful, and pause for a bit.
+      HasAskedForPause = true;
+    }
 #endif
 
 #if defined(USE_THREADS) || defined(USE_PROCESSES)
