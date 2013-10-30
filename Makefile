@@ -51,7 +51,7 @@ endif
 
 PROCESS_MACROS := -DUSE_PROCESSES
 
-CXXFLAGS := -g -O3 -DHAVE_TYPE_TRAITS=1 $(THREAD_MACROS) $(MPI_MACROS) $(PROCESS_MACROS) \
+CXXFLAGS := -O3 -DHAVE_TYPE_TRAITS=1 $(THREAD_MACROS) $(MPI_MACROS) $(PROCESS_MACROS) \
              $(shell $(ROOTSYS)/bin/root-config --cflags) \
              -I$(shell exo-config --incdir) \
              -I$(BOOST_DIR)/include         \
