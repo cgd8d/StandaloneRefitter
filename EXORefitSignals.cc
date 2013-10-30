@@ -1141,24 +1141,42 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
     for(size_t n = 0; n < event.fNumSignals; n++) { // signals
       // Compute the factors common to all frequencies.
       double CommonFactor = 0;
-      for(size_t g = 0; g <= MAX_F - MIN_F; g++) {
+      for(size_t g = 0; g < MAX_F - MIN_F; g++) {
         size_t DiagIndex = 2*fChannels.size()*g + k;
         size_t InIndex = n*event.fColumnLength + DiagIndex;
         CommonFactor += event.fmodel_realimag[2*g] * in[InIndex] *
                         fInvSqrtNoiseDiag[DiagIndex];
-        if(g < MAX_F-MIN_F) CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+fChannels.size()] *
-                                            fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
+        CommonFactor += event.fmodel_realimag[2*g+1] * in[InIndex+fChannels.size()] *
+                        fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
+      }
+      {
+        // For g == MAX_F - MIN_F, we only deal with the real part.
+        // Explicitly perform this iteration separately to avoid having a branch in the inner loop.
+        size_t g = MAX_F - MIN_F;
+        size_t DiagIndex = 2*fChannels.size()*g + k;
+        size_t InIndex = n*event.fColumnLength + DiagIndex;
+        CommonFactor += event.fmodel_realimag[2*g] * in[InIndex] *
+                        fInvSqrtNoiseDiag[DiagIndex];
       }
       CommonFactor *= ChannelFactors;
 
       // Now actually transfer the changes to the out vector.
-      for(size_t f = 0; f <= MAX_F - MIN_F; f++) {
+      for(size_t f = 0; f < MAX_F - MIN_F; f++) {
         size_t DiagIndex = 2*fChannels.size()*f + k;
         size_t OutIndex = n*event.fColumnLength + DiagIndex;
         out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] *
                          fInvSqrtNoiseDiag[DiagIndex];
-        if(f < MAX_F-MIN_F) out[OutIndex+fChannels.size()] += CommonFactor * event.fmodel_realimag[2*f+1] *
-                                               fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
+        out[OutIndex+fChannels.size()] += CommonFactor * event.fmodel_realimag[2*f+1] *
+                         fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
+      }
+      {
+        // For f == MAX_F - MIN_F, we only deal with the real part.
+        // Explicitly perform this iteration separately to avoid having a branch in the inner loop.
+        size_t f = MAX_F - MIN_F;
+        size_t DiagIndex = 2*fChannels.size()*f + k;
+        size_t OutIndex = n*event.fColumnLength + DiagIndex;
+        out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] *
+                         fInvSqrtNoiseDiag[DiagIndex];
       }
     }
   } // End Poisson terms.
