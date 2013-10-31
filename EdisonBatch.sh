@@ -15,7 +15,7 @@ echo "For a check, are there any already-running instances of socat?"
 ps -Af | grep socat
 
 SOCAT_PORT=`$PBS_O_WORKDIR/GetSocatPort.sh`
-/project/projectdirs/exo200/exo_out/bin/socat TCP4-LISTEN:$SOCAT_PORT,fork TCP4:scalnx-v02.slac.stanford.edu:3967 &
+/project/projectdirs/exo200/exo_out/bin/socat TCP4-LISTEN:$SOCAT_PORT,fork TCP4:exolnx-v02.slac.stanford.edu:3967 &
 socatpid=$!
 echo "We will communicate through $HOST:$SOCAT_PORT; socat has pid $socatpid."
 echo "Running Job0000."
