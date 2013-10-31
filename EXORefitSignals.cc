@@ -29,6 +29,8 @@
 #include "TH3D.h"
 #include "TGraph.h"
 #include "mkl_trans.h"
+#include <boost/bind.hpp>
+#include <boost/ref.hpp>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -1193,38 +1195,33 @@ void EXORefitSignals::DoNoiseMultiplication()
 
   // Do the multiplication -- one call for every frequency.
   if(fVerbose) std::cout<<"Starting DoNoiseMultiplication."<<std::endl;
+
+  // Queue for managing frequencies to handle in DoNoiseMultiplication.
+  // We want to handle the inclusive range [0, MAX_F-MIN_F].
+  boost::lockfree::queue<size_t, boost::lockfree::capacity<MAX_F-MIN_F+1> > freq_queue;
+  assert(freq_queue.is_lock_free());
+  for(size_t f = 0; f <= MAX_F-MIN_F; f++) {
+    assert(freq_queue.bounded_push(f));
+  }
+
 #ifdef USE_THREADS
   boost::thread_group threads;
-
-  // frequencies_per_thread is the number of frequencies to distribute, rounding down.
-  // threads_with_extra is the number of threads we'll actually give one extra frequency to.
-  size_t frequencies_per_thread = (MAX_F-MIN_F+1)/(NUM_THREADS); // round down
-  size_t threads_with_extra = (MAX_F-MIN_F+1) - frequencies_per_thread*(NUM_THREADS);
-  assert(frequencies_per_thread*NUM_THREADS <= MAX_F-MIN_F+1);
-  assert(threads_with_extra < NUM_THREADS);
-
-  for(size_t i = 0; i < threads_with_extra; i++) {
-    size_t flo = i*(frequencies_per_thread+1);
-    threads.add_thread(new boost::thread(&EXORefitSignals::DoNoiseMultiplication_Range,
-                                         this,
-                                         flo,
-                                         size_t(flo + frequencies_per_thread + 1)));
+  for(size_t i = 0; i < NUM_THREADS-1; i++) {
+    // Create threads which will grab entries off of freq_queue until it is empty.
+    threads.create_thread(boost::bind(&EXORefitSignals::DoNoiseMultiplication_FromQueue,
+                                      this, boost::ref(freq_queue)));
   }
-  for(size_t i = threads_with_extra; i < (NUM_THREADS)-1; i++) {
-    size_t flo = threads_with_extra + i*frequencies_per_thread;
-    threads.add_thread(new boost::thread(&EXORefitSignals::DoNoiseMultiplication_Range,
-                                         this,
-                                         flo,
-                                         flo + frequencies_per_thread));
-  }
-  // Don't create the last thread; *this* is the last thread.
-  size_t flo = threads_with_extra + ((NUM_THREADS)-1)*frequencies_per_thread;
-  DoNoiseMultiplication_Range(flo, (MAX_F-MIN_F+1)); // to handle [0, MAX_F-MIN_F], inclusive.
-  threads.join_all();
-#else
-  // The sequential version.
-  DoNoiseMultiplication_Range(0, (MAX_F-MIN_F+1)); // to handle [0, MAX_F-MIN_F], inclusive.
 #endif
+
+  // This thread should do work too -- grab frequencies off of freq_queue until it is empty.
+  DoNoiseMultiplication_FromQueue(freq_queue);
+
+#ifdef USE_THREADS
+  // We reached this point because there were no more frequencies for this thread to grab.
+  // Other threads should be done shortly.
+  threads.join_all();
+#endif
+
   if(fVerbose) std::cout<<"Done with DoNoiseMultiplication."<<std::endl;
 
   // Clean up, to be ready for the next call.
@@ -1232,17 +1229,16 @@ void EXORefitSignals::DoNoiseMultiplication()
   fNumVectorsInQueue = 0;
 }
 
-void EXORefitSignals::DoNoiseMultiplication_Range(size_t flo, size_t fhi)
+void EXORefitSignals::DoNoiseMultiplication_FromQueue(
+  boost::lockfree::queue<size_t, boost::lockfree::capacity<MAX_F-MIN_F+1> >& freq_queue)
 {
-  // Do noise multiplications in the range [flo, fhi).
-  // In case we are parallelizing the noise multiplication, this lets us
-  // break up DoNoiseMultiplication into pieces easily.
-  // (If we are not parallelizing, the penalty is probably zero.)
+  // Perform noise multiplications on frequencies from the queue, until it is empty.
   assert(fNoiseMulQueue.size() == fNoiseColumnLength*fNumVectorsInQueue);
   assert(fNoiseMulResult.size() == fNoiseColumnLength*fNumVectorsInQueue);
-  assert(fNoiseCorrelations.size() >= fhi);
 
-  for(size_t f = flo; f < fhi; f++) {
+  size_t f;
+  while(freq_queue.pop(f)) {
+    assert(fNoiseCorrelations.size() > f);
     size_t StartIndex = 2*fChannels.size()*f;
     size_t BlockSize = fChannels.size() * (f < MAX_F - MIN_F ? 2 : 1);
     assert(fNoiseCorrelations[f].size() == BlockSize*BlockSize);
