@@ -1191,7 +1191,7 @@ void EXORefitSignals::DoNoiseMultiplication()
   // otherwise, the vector lengths would not match.
   // The result is placed in fNoiseMulResult.
   assert(fNoiseMulQueue.size() == fNoiseColumnLength * fNumVectorsInQueue);
-  fNoiseMulResult.assign(fNoiseMulQueue.size(), 0); // Probably don't need to fill with 0.
+  fNoiseMulResult.resize(fNoiseMulQueue.size()); // Do not initialize.
 
   // Do the multiplication -- one call for every frequency.
   if(fVerbose) std::cout<<"Starting DoNoiseMultiplication."<<std::endl;
