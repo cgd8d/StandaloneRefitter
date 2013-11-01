@@ -1492,13 +1492,6 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
   // Store an event which is ready to be finished.
   // Also clear all of the unneeded large vectors in the event.
 
-  // A simple clear doesn't force a deallocation, which is what we need here.
-  std::vector<double>().swap(event->fR);
-  std::vector<double>().swap(event->fP);
-  std::vector<double>().swap(event->fR0hat);
-  std::vector<double>().swap(event->fV);
-  std::vector<double>().swap(event->fprecon_tmp);
-
   // Also undo preconditioning of X.
   // (Don't defer this, or important quantities may get changed by a new noise correlation matrix.)
   if(not event->fX.empty()) {
@@ -1508,6 +1501,13 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
       if(imod < fNoiseColumnLength) event->fX[i] *= fInvSqrtNoiseDiag[imod];
     }
   }
+
+  // A simple clear doesn't force a deallocation, which is what we need here.
+  std::vector<double>().swap(event->fR);
+  std::vector<double>().swap(event->fP);
+  std::vector<double>().swap(event->fR0hat);
+  std::vector<double>().swap(event->fV);
+  std::vector<double>().swap(event->fprecon_tmp);
 
 #ifdef USE_PROCESSES
   #ifdef USE_THREADS 
