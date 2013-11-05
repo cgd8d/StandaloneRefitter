@@ -34,11 +34,6 @@ EventFinisher::EventFinisher(EXOTreeInputModule& inputModule, std::string RawFil
   fOutputModule.BeginOfRun(NULL);
 }
 
-EventFinisher::~EventFinisher()
-{
-  fOutputModule.ShutDown();
-}
-
 void EventFinisher::QueueEvent(EventHandler* eventHandler)
 {
   // Take ownership of an event; don't actually finish it yet,
@@ -210,7 +205,7 @@ void EventFinisher::Run()
       // if we weren't woken because there were events to finish,
       // then we'd better have gotten here because processing is done.
       assert(fProcessingIsDone);
-      // Both sequential and threaded code should only get here because they're done.
+      fOutputModule.ShutDown();
       return;
     }
 
