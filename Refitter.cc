@@ -171,12 +171,14 @@ int main(int argc, char** argv)
     static SafeStopwatch WaitForFinisherWatch("Waiting for events to be finished at the end (sequential)");
     SafeStopwatch::tag WaitForFinisherTag = WaitForFinisherWatch.Start();
     // Send a message with a non-zero tag -- the payload is unimportant.
+#ifdef USE_SHARED_MEMORY
     std::ostringstream SemaphoreName;
     SemaphoreName << "IOSemaphore_" << mpi.rank;
     boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
                                                      SemaphoreName.str().c_str(),
                                                      0);
     IOSemaphore.post();
+#endif
     mpi.comm.send(mpi.rank+1, 1, EventHandler());
     WaitForFinisherWatch.Stop(WaitForFinisherTag);
   }

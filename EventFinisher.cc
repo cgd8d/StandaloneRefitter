@@ -6,9 +6,14 @@
 
 #include <boost/thread/thread.hpp>
 
+#ifdef USE_SHARED_MEMORY
 #include <boost/interprocess/sync/named_semaphore.hpp>
 #include <boost/interprocess/creation_tags.hpp>
 #include <sstream>
+#else
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+#endif
+
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
 
@@ -240,23 +245,39 @@ size_t EventFinisher::GetFinishEventQueueLength()
 
 void EventFinisher::ListenForArrivingEvents()
 {
+
+#ifdef USE_SHARED_MEMORY
   std::ostringstream SemaphoreName;
   SemaphoreName << "IOSemaphore_" << gMPIComm.rank()-1;
   static boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
                                                           SemaphoreName.str().c_str(),
                                                           0);
+#endif
+
 #ifdef USE_THREADS
   // If we're using threads, we'll wait until done.
   while (1)
 #endif // If we're not using threads, just receive once.
   {
     EventHandler* eh = new EventHandler;
+#ifdef USE_SHARED_MEMORY
+    // If it's safe to have shared memory, use it to do an efficient wait.
     IOSemaphore.wait();
     boost::mpi::status s = gMPIComm.recv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
+#else
+    // Otherwise, do a busy (but not too busy) wait.
+    boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
+    boost::optional<boost::mpi::status> s;
+    while ( ! (s = req.test()) ) {
+      boost::this_thread::sleep(boost::posix_time::millisec(1));
+    }
+#endif
     if(s.tag()) {
+#ifdef USE_SHARED_MEMORY
       if(fVerbose) std::cout<<"Removing the named semaphore from the system."<<std::endl;
       bool success = boost::interprocess::named_semaphore::remove(SemaphoreName.str().c_str());
       assert(success);
+#endif
 #ifdef USE_THREADS
       SetProcessingIsFinished();
 #else

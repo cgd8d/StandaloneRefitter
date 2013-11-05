@@ -62,8 +62,11 @@ boost::mutex CoutMutex;
 
 #endif
 
+#ifdef USE_SHARED_MEMORY
 #include <boost/interprocess/sync/named_semaphore.hpp>
 #include <boost/interprocess/creation_tags.hpp>
+#endif
+
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
 
@@ -1499,12 +1502,16 @@ void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
 {
   static SafeStopwatch watch("EXORefitSignals::FinishProcessedEvent (sequential)");
   SafeStopwatch::tag tag = watch.Start();
+#ifdef USE_SHARED_MEMORY
+  // Post to the semaphore; roughly simultaneously, send an event.
+  // This doesn't have to be perfectly synchronous.
   std::ostringstream SemaphoreName;
   SemaphoreName << "IOSemaphore_" << gMPIComm.rank();
   static boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
                                                           SemaphoreName.str().c_str(),
                                                           0);
   IOSemaphore.post();
+#endif
   gMPIComm.send(gMPIComm.rank()+1, 0, *event);
   delete event;
   watch.Stop(tag);
