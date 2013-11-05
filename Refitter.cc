@@ -30,13 +30,10 @@ Should be called like:
 #include <boost/chrono/duration.hpp>
 #endif
 
-#ifdef USE_PROCESSES
 #include <boost/interprocess/sync/named_semaphore.hpp>
 #include <boost/interprocess/creation_tags.hpp>
 #include <sstream>
-#endif
 
-#ifdef USE_MPI
 #include <fstream>
 #include <iomanip>
 #include <boost/mpi/environment.hpp>
@@ -57,11 +54,7 @@ struct mpi_handler
   {
     assert(argc >= 2);
     rank = comm.rank();
-#ifdef USE_PROCESSES
     numa_rank = rank/2;
-#else
-    numa_rank = rank;
-#endif
 
     // Make sure every rank has its own output file.
     std::ostringstream OutFileName;
@@ -76,16 +69,12 @@ struct mpi_handler
     RankString = ProcessRankString.str();
   }
 };
-#else
-#include <cstdlib>
-#endif
 
 int main(int argc, char** argv)
 {
-#ifdef USE_MPI
+
   // This should be the very first thing created, and the very last destroyed (as nearly as possible).
   static mpi_handler mpi(argc, argv);
-#endif
   std::cout<<"Entered program."<<std::endl;
   static SafeStopwatch WholeProgramWatch("Whole program (sequential)");
   SafeStopwatch::tag WholeProgramTag = WholeProgramWatch.Start();
@@ -97,7 +86,6 @@ int main(int argc, char** argv)
   Long64_t NumEntries = 100;
   double Threshold = 10;
 
-#ifdef USE_MPI
   std::ifstream OptionFile((std::string(argv[1]) + "/infile" + mpi.RankString).c_str());
   OptionFile >> ProcessedFileName
              >> RawFileName
@@ -111,16 +99,6 @@ int main(int argc, char** argv)
   std::string mom_ip = argv[2]; // Should also include port number used.
   ProcessedFileName = "root://cgd8d@" + mom_ip + "/" + ProcessedFileName + "?cachesz=300000000";
   RawFileName = "root://cgd8d@" + mom_ip + "/" + RawFileName;
-#else
-  assert(argc >= 4);
-  ProcessedFileName = argv[1];
-  RawFileName = argv[2];
-  OutFileName = argv[3];
-  NoiseFileName = argv[4];
-  if(argc >= 6) StartEntry = std::atol(argv[5]);
-  if(argc >= 7) NumEntries = std::atol(argv[6]);
-  if(argc >= 8) Threshold = std::atof(argv[7]);
-#endif
 
   std::cout<<"Input processed file: "<<ProcessedFileName<<std::endl;
   std::cout<<"Input raw file: "<<RawFileName<<std::endl;
@@ -134,7 +112,6 @@ int main(int argc, char** argv)
   InputModule.SetFilename(ProcessedFileName);
   std::cout<<"Successfully set filename."<<std::endl;
 
-#if defined(USE_MPI) && defined(USE_PROCESSES)
   if(mpi.rank % 2 == 1) {
     // This is an io process.
     EventFinisher& finisher = EventFinisher::Get(InputModule, RawFileName, OutFileName);
@@ -144,113 +121,64 @@ int main(int argc, char** argv)
   }
   else {
     // This is a compute process.
-#else
-  // We need both io and compute objects.
-  EventFinisher& finisher = EventFinisher::Get(InputModule, RawFileName, OutFileName);
-#endif
 
-  EXORefitSignals RefitSig
-#ifndef USE_PROCESSES
-    (finisher)
-#endif
-  ;
-  EXOCalibManager::GetCalibManager().SetMetadataAccessType("text");
-  RefitSig.SetNoiseFilename(NoiseFileName);
-  RefitSig.SetRThreshold(Threshold);
-  RefitSig.fVerbose = true;
-  RefitSig.Initialize();
+    EXORefitSignals RefitSig;
+    EXOCalibManager::GetCalibManager().SetMetadataAccessType("text");
+    RefitSig.SetNoiseFilename(NoiseFileName);
+    RefitSig.SetRThreshold(Threshold);
+    RefitSig.fVerbose = true;
+    RefitSig.Initialize();
 
 #ifdef USE_THREADS
-  std::cout<<"Using "<<NUM_THREADS<<" threads."<<std::endl;
+    std::cout<<"Using "<<NUM_THREADS<<" threads."<<std::endl;
 #else
-  std::cout<<"Sequential code."<<std::endl;
+    std::cout<<"Sequential code."<<std::endl;
 #endif
 
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-  // Start a finish-up thread.
-  boost::thread finishThread(&EventFinisher::Run, &finisher);
-#endif
+    // Put out a continuing non-blocking request for messages from the io process.
+    boost::mpi::request req = mpi.comm.irecv(mpi.rank+1, 1);
 
-#ifdef USE_PROCESSES
-  // Put out a continuing non-blocking request for messages from the io process.
-  boost::mpi::request req = mpi.comm.irecv(mpi.rank+1, 1);
-#endif
+    for(Long64_t entryNum = StartEntry;
+        NumEntries == -1 or entryNum < StartEntry + NumEntries;
+        entryNum++) {
+      if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
 
-  for(Long64_t entryNum = StartEntry;
-      NumEntries == -1 or entryNum < StartEntry + NumEntries;
-      entryNum++) {
-    if(entryNum % 10 == 0) std::cout << "Grabbing entry " << entryNum << std::endl;
-
-    // Don't let computation get too far ahead of io, or we'll run out of memory.
-    static SafeStopwatch StallingWatch("Stalling in main thread (sequential)");
-    SafeStopwatch::tag StallingTag = StallingWatch.Start();
-#ifdef USE_PROCESSES
-    if(req.test()) { // We've been asked to pause.
-      std::cout<<"Stalling the computation threads for FinishEvent to catch up."<<std::endl;
-      mpi.comm.recv(mpi.rank+1, 0); // Wait until we get the go-ahead.
-      req = mpi.comm.irecv(mpi.rank+1, 1); // Back to a passive wait for problems.
-    }
-#else
-    if(entryNum % 100 == 0) {
-#ifdef USE_THREADS
-      while(finisher.GetFinishEventQueueLength() > 5000) {
-        // If we're getting ahead of FinishEvent, wait a bit for it to catch up.
-        // This is purely a memory concern of how many events we can save on the queue.
+      // Don't let computation get too far ahead of io, or we'll run out of memory.
+      static SafeStopwatch StallingWatch("Stalling in main thread (sequential)");
+      SafeStopwatch::tag StallingTag = StallingWatch.Start();
+      if(req.test()) { // We've been asked to pause.
         std::cout<<"Stalling the computation threads for FinishEvent to catch up."<<std::endl;
-        boost::this_thread::sleep_for(boost::chrono::seconds(5));
+        mpi.comm.recv(mpi.rank+1, 0); // Wait until we get the go-ahead.
+        req = mpi.comm.irecv(mpi.rank+1, 1); // Back to a passive wait for problems.
       }
-#else
-      finisher.Run();
-#endif
+      StallingWatch.Stop(StallingTag);
+
+      static SafeStopwatch InputModuleWatch("InputModule in main (sequential)");
+      SafeStopwatch::tag InputModuleTag = InputModuleWatch.Start();
+      EXOEventData* ED = InputModule.GetEvent(entryNum);
+      InputModuleWatch.Stop(InputModuleTag);
+      if(ED == NULL) break;
+      static SafeStopwatch AcceptEventWatch("AcceptEvent (sequential)");
+      SafeStopwatch::tag AcceptEventTag = AcceptEventWatch.Start();
+      RefitSig.AcceptEvent(ED, entryNum);
+      AcceptEventWatch.Stop(AcceptEventTag);
     }
-#endif
-    StallingWatch.Stop(StallingTag);
 
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-    static SafeStopwatch GetLockWatch("Get lock in main (sequential)");
-    SafeStopwatch::tag GetLockTag = GetLockWatch.Start();
-    boost::mutex::scoped_lock locLock(RootInterfaceMutex);
-    GetLockWatch.Stop(GetLockTag);
-#endif
-    static SafeStopwatch InputModuleWatch("InputModule in main (sequential)");
-    SafeStopwatch::tag InputModuleTag = InputModuleWatch.Start();
-    EXOEventData* ED = InputModule.GetEvent(entryNum);
-    InputModuleWatch.Stop(InputModuleTag);
-    if(ED == NULL) break;
-    static SafeStopwatch AcceptEventWatch("AcceptEvent (sequential)");
-    SafeStopwatch::tag AcceptEventTag = AcceptEventWatch.Start();
-    RefitSig.AcceptEvent(ED, entryNum
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-      , locLock
-#endif
-    );
-    AcceptEventWatch.Stop(AcceptEventTag);
+    static SafeStopwatch FlushEventsWatch("FlushEvents (sequential)");
+    SafeStopwatch::tag FlushEventsTag = FlushEventsWatch.Start();
+    RefitSig.FlushEvents();
+    FlushEventsWatch.Stop(FlushEventsTag);
+    static SafeStopwatch WaitForFinisherWatch("Waiting for events to be finished at the end (sequential)");
+    SafeStopwatch::tag WaitForFinisherTag = WaitForFinisherWatch.Start();
+    // Send a message with a non-zero tag -- the payload is unimportant.
+    std::ostringstream SemaphoreName;
+    SemaphoreName << "IOSemaphore_" << mpi.rank;
+    boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
+                                                     SemaphoreName.str().c_str(),
+                                                     0);
+    IOSemaphore.post();
+    mpi.comm.send(mpi.rank+1, 1, EventHandler());
+    WaitForFinisherWatch.Stop(WaitForFinisherTag);
   }
-
-  static SafeStopwatch FlushEventsWatch("FlushEvents (sequential)");
-  SafeStopwatch::tag FlushEventsTag = FlushEventsWatch.Start();
-  RefitSig.FlushEvents();
-  FlushEventsWatch.Stop(FlushEventsTag);
-  static SafeStopwatch WaitForFinisherWatch("Waiting for events to be finished at the end (sequential)");
-  SafeStopwatch::tag WaitForFinisherTag = WaitForFinisherWatch.Start();
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-  finisher.SetProcessingIsFinished();
-  finishThread.join();
-#elif defined(USE_PROCESSES)
-  // Send a message with a non-zero tag -- the payload is unimportant.
-  std::ostringstream SemaphoreName;
-  SemaphoreName << "IOSemaphore_" << mpi.rank;
-  boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
-                                                   SemaphoreName.str().c_str(),
-                                                   0);
-  IOSemaphore.post();
-  mpi.comm.send(mpi.rank+1, 1, EventHandler());
-#else
-  finisher.Run();
-#endif
-  WaitForFinisherWatch.Stop(WaitForFinisherTag);
-#ifdef USE_PROCESSES
-  }
-#endif
   WholeProgramWatch.Stop(WholeProgramTag);
 }

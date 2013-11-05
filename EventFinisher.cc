@@ -4,17 +4,13 @@
 #include "EXOUtilities/EXOWaveform.hh"
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
 
-#ifdef USE_PROCESSES
 #include <boost/thread/thread.hpp>
-#endif
 
-#ifdef USE_PROCESSES
 #include <boost/interprocess/sync/named_semaphore.hpp>
 #include <boost/interprocess/creation_tags.hpp>
 #include <sstream>
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
-#endif
 
 EventFinisher& EventFinisher::Get(EXOTreeInputModule& inputModule,
                                   std::string RawFileName,
@@ -27,12 +23,9 @@ EventFinisher& EventFinisher::Get(EXOTreeInputModule& inputModule,
 EventFinisher::EventFinisher(EXOTreeInputModule& inputModule, std::string RawFileName, std::string OutFileName)
 : fVerbose(true),
   fInputModule(inputModule),
-  fWaveformFile(RawFileName.c_str())
-#if defined(USE_THREADS) || defined(USE_PROCESSES)
-  ,
+  fWaveformFile(RawFileName.c_str()),
   fDesiredQueueLength(2000),
   fProcessingIsDone(false)
-#endif
 {
   fWaveformTree = dynamic_cast<TTree*>(fWaveformFile.Get("tree"));
   fWaveformTree->GetBranch("fWaveformData")->SetAddress(&fWFData);
@@ -131,9 +124,6 @@ void EventFinisher::FinishEvent(EventHandler* event)
 
     // Collect the fourier-transformed waveforms.  Save them split into real and complex parts.
     std::vector<EXODoubleWaveform> WF_real, WF_imag;
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-    FFTWMutex.lock();
-#endif
     for(size_t i = 0; i < event->fChannels.size(); i++) {
       const EXOWaveform* wf = fWFData.GetWaveformWithChannel(event->fChannels[i]);
 
@@ -156,9 +146,6 @@ void EventFinisher::FinishEvent(EventHandler* event)
       for(size_t f = 0; f < fwf.GetLength(); f++) iwf[f] = fwf[f].imag();
       WF_imag.push_back(iwf);
     }
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-    FFTWMutex.unlock();
-#endif
 
     // Produce estimates of the signals.
     for(size_t i = 0; i < Results.size(); i++) {
@@ -176,9 +163,6 @@ void EventFinisher::FinishEvent(EventHandler* event)
     }
   } // End setting of denoised energy signals.
 
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-  boost::mutex::scoped_lock sL(RootInterfaceMutex);
-#endif
   FinishProcessedEvent(event, Results); // Deletes event.
 }
 
@@ -187,20 +171,17 @@ void EventFinisher::Run()
   // Call FinishEvent repeatedly until the queue is empty.
   // When the queue is empty, either return or sleep until more events are available.
 
-#if defined(USE_THREADS) && defined(USE_PROCESSES)
+#ifdef USE_THREADS
   boost::thread pull_data(&EventFinisher::ListenForArrivingEvents, this);
 #endif
 
-#ifdef USE_PROCESSES
   bool HasAskedForPause = false;
-#endif
 
   while(true) {
 #ifdef USE_THREADS
     boost::mutex::scoped_lock sL(fFinisherMutex);
 #endif
 
-#ifdef USE_PROCESSES
     // If we ever get behind, we need the ability to ask the compute process to pause for a bit.
     // When we get caught up, we permit it to continue.
     if(HasAskedForPause and fEventsToFinish.size() < 4000) {
@@ -213,27 +194,22 @@ void EventFinisher::Run()
       gMPIComm.send(gMPIComm.rank() - 1, 1); // Please be merciful, and pause for a bit.
       HasAskedForPause = true;
     }
-#endif
 
-#if defined(USE_THREADS) || defined(USE_PROCESSES)
     // Force ourselves to wait until the finish-events queue has a certain length (or processing is done).
     while(not fProcessingIsDone and
           fEventsToFinish.size() < fDesiredQueueLength) {
 #ifdef USE_THREADS
       fFinisherCondition.wait(sL);
-#else // USE_PROCESSES but not USE_THREADS -- we have to ask for another event within this thread.
+#else // not USE_THREADS -- we have to ask for another event within this thread.
       ListenForArrivingEvents();
 #endif
     }
-#endif
     std::set<EventHandler*, CompareEventHandlerPtrs>::iterator it = fEventsToFinish.begin();
     if(it == fEventsToFinish.end()) {
-#if defined(USE_THREADS) || defined(USE_PROCESSES)
       // We assume only one io thread; in that case,
       // if we weren't woken because there were events to finish,
       // then we'd better have gotten here because processing is done.
       assert(fProcessingIsDone);
-#endif
       // Both sequential and threaded code should only get here because they're done.
       return;
     }
@@ -267,7 +243,6 @@ size_t EventFinisher::GetFinishEventQueueLength()
   return fEventsToFinish.size();
 }
 
-#ifdef USE_PROCESSES
 void EventFinisher::ListenForArrivingEvents()
 {
   std::ostringstream SemaphoreName;
@@ -298,4 +273,3 @@ void EventFinisher::ListenForArrivingEvents()
     QueueEvent(eh);
   }
 }
-#endif

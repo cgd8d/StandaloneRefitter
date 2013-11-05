@@ -55,27 +55,19 @@
 boost::mutex RootInterfaceMutex; // Mutex for processed event handling and everything that involves.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
 boost::mutex FFTWMutex; // EXOFastFourierTransformFFTW is not thread-safe; non-trivial to change.
-#ifdef USE_PROCESSES
 static boost::mutex SaveToPushMutex; // We can't use MPI across threads 
-#endif
 
 // And a mutex for writing debugging output from threaded parts of the code.
 boost::mutex CoutMutex;
 
 #endif
 
-#ifdef USE_PROCESSES
 #include <boost/interprocess/sync/named_semaphore.hpp>
 #include <boost/interprocess/creation_tags.hpp>
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
-#endif
 
-EXORefitSignals::EXORefitSignals(
-#ifndef USE_PROCESSES
-  EventFinisher& finisher
-#endif
-)
+EXORefitSignals::EXORefitSignals()
 :
 #ifdef ENABLE_CHARGE
   fAPDsOnly(false),
@@ -84,9 +76,6 @@ EXORefitSignals::EXORefitSignals(
   fVerbose(false),
   fDoRestarts(100),
   fNumMulsToAccumulate(500),
-#ifndef USE_PROCESSES
-  fEventFinisher(finisher),
-#endif
   fLightmapFilename("data/lightmap/LightMaps.root"),
   fRThreshold(0.1),
   fEventHandlerQueue(0), // The default lockfree constructor is not allowed.
@@ -564,11 +553,7 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
 }
 #endif
 
-void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-  , boost::mutex::scoped_lock& locLock
-#endif
-  )
+void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 {
   // Push in one more event to handle; return whatever events are able to finish.
   // Do whatever matrix multiplications are now warranted.
@@ -774,9 +759,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum
     } // End loop over u-wire signals.
   } // (which we only did if we're handling wire signals.
   event->fNumSignals += event->fWireModel.size();
-#endif
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-  locLock.unlock(); // When locLock is destroyed, it will no longer auto release.
 #endif
 
   // For convenience, store the column length we'll be dealing with.
@@ -1424,14 +1406,12 @@ void EXORefitSignals::DoPassThroughEvents()
     assert(fEventHandlerQueue.unsynchronized_push(evt));
   }
 
-#ifdef USE_PROCESSES
   // We're serial here, don't lock
   while (not fSaveToPushEH.empty()) {
     EHSet::iterator it = fSaveToPushEH.begin();
     FinishProcessedEvent(*it);
     fSaveToPushEH.erase(it); 
   }
-#endif
   DoPassWatch.Stop(DoPassTag);
 }
 
@@ -1509,21 +1489,16 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
   std::vector<double>().swap(event->fV);
   std::vector<double>().swap(event->fprecon_tmp);
 
-#ifdef USE_PROCESSES
   #ifdef USE_THREADS 
   boost::mutex::scoped_lock sL(SaveToPushMutex); 
   #endif
   fSaveToPushEH.insert(event);
-#else
-  fEventFinisher.QueueEvent(event);
-#endif
 }
 
 void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
 {
   static SafeStopwatch watch("EXORefitSignals::FinishProcessedEvent (sequential)");
   SafeStopwatch::tag tag = watch.Start();
-#ifdef USE_PROCESSES
   std::ostringstream SemaphoreName;
   SemaphoreName << "IOSemaphore_" << gMPIComm.rank();
   static boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
@@ -1532,8 +1507,5 @@ void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
   IOSemaphore.post();
   gMPIComm.send(gMPIComm.rank()+1, 0, *event);
   delete event;
-#else
-  fEventFinisher.FinishProcessedEvent(event);
-#endif
   watch.Stop(tag);
 }

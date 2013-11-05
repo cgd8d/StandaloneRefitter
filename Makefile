@@ -26,7 +26,6 @@ else
                -lNetx -lXrdClient -lXrdUtils -lCore -lMathCore -lMatrix -lThread \
                -lCint -lGraf3d -lPhysics -lMinuit -lm -ldl -Wl,-Bstatic
   XROOTD_LIBFLAGS := -L/global/project/projectdirs/exo200/software/lib/xrootd/3.3.4/lib
-  MPI_MACROS :=-DUSE_MPI
   MKL_LIBS := -Wl,-Bstatic -Wl,--start-group \
               -lmkl_intel_lp64 -lmkl_sequential -lmkl_core \
               -Wl,--end-group -Wl,-Bdynamic
@@ -49,9 +48,7 @@ else
   endif
 endif
 
-PROCESS_MACROS := -DUSE_PROCESSES
-
-CXXFLAGS := -O3 -DHAVE_TYPE_TRAITS=1 $(THREAD_MACROS) $(MPI_MACROS) $(PROCESS_MACROS) \
+CXXFLAGS := -O3 -DHAVE_TYPE_TRAITS=1 $(THREAD_MACROS) \
              $(shell $(ROOTSYS)/bin/root-config --cflags) \
              -I$(shell exo-config --incdir) \
              -I$(BOOST_DIR)/include         \

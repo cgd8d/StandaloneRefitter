@@ -16,7 +16,6 @@ else
 	export CXX='CC -dynamic -std=c++11 -pthread'
 	export EXO_LIBS="-Wl,-Bstatic -Wl,-u,gEXOCalibBuilder_EXOElectronicsShapersHandler -Wl,-u,gEXOCalibBuilder_EXOUWireGainsHandler -Wl,-u,gEXOCalibBuilder_EXOChannelMapHandler -lEXOAnalysis -lfftw3 -lmysqlclient -Wl,-Bdynamic"
 	export ROOT_LIBS="-lRIO -lHist -lGraf -lTree -lNet -lGpad -lTreePlayer -lNetx -lXrdClient -lCore -lMathCore -lMatrix -lThread -lCint -lGraf3d"
-	export MPI_MACROS="-DUSE_MPI"
 	if [ "$NERSC_HOST" = "hopper" ]; then
 		export THREAD_MACROS="-DUSE_THREADS -DNUM_THREADS=6"
 	elif [ "$NERSC_HOST" = "edison" ]; then
@@ -28,7 +27,7 @@ else
 fi
 
 $CXX -O3 -g \
--DHAVE_TYPE_TRAITS=1 $THREAD_MACROS $MPI_MACROS \
+-DHAVE_TYPE_TRAITS=1 $THREAD_MACROS \
 `root-config --cflags` -I`exo-config --incdir` -L`root-config --libdir` -L`exo-config --libdir` \
 -I$MKL_INC -L$MKL_LIBDIR -L$FFTW_DIR \
 `mysql_config --libs | sed 's:\ :\n:g' | grep '\-L' | grep mysql` \

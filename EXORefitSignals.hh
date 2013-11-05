@@ -45,11 +45,7 @@ class EXORefitSignals
 {
  public:
   // Functions specified in the order they should be called.
-  EXORefitSignals(
-#ifndef USE_PROCESSES
-    EventFinisher& finisher
-#endif
-  );
+  EXORefitSignals();
 
   void SetNoiseFilename(std::string name) { fNoiseFilename = name; }
   void SetLightmapFilename(std::string name) { fLightmapFilename = name; }
@@ -63,18 +59,11 @@ class EXORefitSignals
   size_t fNumMulsToAccumulate;
 
   int Initialize();
-  void AcceptEvent(EXOEventData* ED, Long64_t entryNum
-#if defined(USE_THREADS) && !defined(USE_PROCESSES)
-  , boost::mutex::scoped_lock& locLock
-#endif
-   );
+  void AcceptEvent(EXOEventData* ED, Long64_t entryNum);
   void FlushEvents();
   ~EXORefitSignals();
 
  protected:
-#ifndef USE_PROCESSES
-  EventFinisher& fEventFinisher;
-#endif
 
   // fNoiseCorrelations[f-MIN_F] stores the matrix of noise correlations at frequency f.
   // This matrix is a single contiguous array, ordered like:
