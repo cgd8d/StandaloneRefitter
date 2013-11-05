@@ -31,7 +31,18 @@ ProcDataset = ROOT.EXORunInfoManager.GetDataSet("Data/Processed/masked",
                                                 "run>=2464&&run<=5367&&runType==\"Data-Source calibration\"")
 
 def JobForProc(procFile, runNo):
-    FileParts = procFile.split('/')[-6:]
+    FilePartsFull = procFile.split('/')
+    FileParts = FilePartsFull[-6:]
+    if FilePartsFull[-3] == "processed":
+        # Check for the existence of the masked file.  (We may not have permission to check for the proc file.)
+        FileToVerify_Parts = list(FilePartsFull)
+        FileToVerify_Parts[-3] = "masked"
+        FileToVerify_Parts[-1] = "masked" + FileToVerify_Parts[-1][-17:]
+        FileToVerify = '/' + '/'.join(FileToVerify_Parts)
+    else:
+        FileToVerify = procFile
+    if not os.path.isfile(FileToVerify):
+        raise OSError("File %s does not exist. (Processing must have failed.)" % FileToVerify)
     FileBase = FileParts[-1][-17:]
     xrootd_procfile = '/' + '/'.join(FileParts)
     FileParts[-3] = 'root'
@@ -53,8 +64,11 @@ for runInfo in ProcDataset:
             Job = JobForProc(runFile.GetFileLocation(), runInfo.GetRunNumber())
             numEntries = runFile.FindMetaData("eventCount").AsInt()
             ProcsToInsert.append((numEntries, Job))
+    except (ValueError, OSError), exc:
+        print "Failed to add jobs for run %i: %s." % (runInfo.GetRunNumber(), exc.message)
+    else:
         ProcList += ProcsToInsert
-        OutRunList.append(runInfo.GetRunNumber())
+        OutRunList.append(os.path.join(DenoisedOutDir, str(runInfo.GetRunNumber())))
         print "Added jobs for run %i." % runInfo.GetRunNumber()
     except ValueError, exc:
         print "Failed to add jobs for run %i: %s." % (runInfo.GetRunNumber(), exc.message)
@@ -67,19 +81,20 @@ while len(ProcList) > 0:
     ProcsInThisJob = []
     NumProcsInThisJob = ProcsPerJob.pop(0)
     for i in xrange(NumProcsInThisJob):
-        if len(ProcList) > 0: ProcsInThisJob.append(ProcList.pop()[1])
+        if len(ProcList) > 0: ProcsInThisJob.append(ProcList.pop())
     try:
         os.mkdir('Job%04i' % JobIndex)
     except:
         for oldfile in glob.glob('Job%04i' % JobIndex): os.remove(oldfile)
+    with open('Job%04i/LengthOfJob.txt' % JobIndex, 'w') as LengthFile:
+        LengthFile.write("%i entries in the longest job." % ProcsInThisJob[0][0])
     for i in xrange(len(ProcsInThisJob)):
         with open('Job%04i/infile%04i.txt' % (JobIndex, i), 'w') as infile:
-            infile.write(ProcsInThisJob[i])
+            infile.write(ProcsInThisJob[i][1])
     JobIndex += 1
 
 # We run this script at SLAC, and the necessary output folders may not exist -- print the command to run.
 print 'To create the necessary output folders, run \'bash MakeOutDirs.sh\''
 with open('MakeOutDirs.sh', 'w') as make_out_dirs:
     make_out_dirs.write('#!/bin/bash\n')
-    make_out_dirs.write('mkdir -p ' +
-                        ' '.join(map(lambda x: os.path.join(DenoisedOutDir, str(x)), OutRunList)))
+    make_out_dirs.write('mkdir -p ' + ' '.join(OutRunList))
