@@ -54,7 +54,6 @@
 // Create basic mutexes for two multiple-writer situations.
 boost::mutex RootInterfaceMutex; // Mutex for processed event handling and everything that involves.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
-boost::mutex FFTWMutex; // EXOFastFourierTransformFFTW is not thread-safe; non-trivial to change.
 static boost::mutex SaveToPushMutex; // We can't use MPI across threads 
 
 // And a mutex for writing debugging output from threaded parts of the code.
@@ -404,9 +403,6 @@ EXOWaveformFT EXORefitSignals::GetModelForTime(double time) const
   timeModel.SetLength(2048);
   for(size_t i = 0; i < timeModel.GetLength(); i++) timeModel[i] = timeModel_fine[i*refinedFactor];
 
-#ifdef USE_THREADS
-  boost::mutex::scoped_lock sL(FFTWMutex);
-#endif
   EXOWaveformFT fwf;
   EXOFastFourierTransformFFTW::GetFFT(timeModel.GetLength()).PerformFFT(timeModel, fwf);
   assert(fwf.GetLength() == 1025); // Just to make sure I'm reasoning properly.
@@ -538,12 +534,7 @@ std::vector<double> EXORefitSignals::MakeWireModel(EXODoubleWaveform& in,
   }
 
   EXOWaveformFT fwf;
-  {
-#ifdef USE_THREADS
-    boost::mutex::scoped_lock sL(FFTWMutex);
-#endif
-    EXOFastFourierTransformFFTW::GetFFT(2048).PerformFFT(wf, fwf);
-  }
+  EXOFastFourierTransformFFTW::GetFFT(2048).PerformFFT(wf, fwf);
 
   std::vector<double> out;
   out.resize(2*1024-1);
