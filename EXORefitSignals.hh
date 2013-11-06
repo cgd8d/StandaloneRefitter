@@ -14,13 +14,6 @@
 #include <map>
 #include <cassert>
 
-#ifdef USE_THREADS
-#include <boost/thread/mutex.hpp>
-
-// Some mutexes need to be accessible in multiple translation units -- declare them here.
-extern boost::mutex RootInterfaceMutex;
-#endif
-
 class EventFinisher;
 class EXOEventData;
 class EXOWaveformFT;

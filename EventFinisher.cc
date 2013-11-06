@@ -60,7 +60,6 @@ void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<
   // We will also delete event here.
   // This function is particularly useful when called directly for events with no denoising to do;
   // in that case, it allows us to complete handling of an event without unnecessary lock management.
-  // Prerequisite: RootInterfaceMutex must be locked by the caller.
   if(fVerbose) std::cout<<"\tFinishProcessedEvent for entry "<<event->fEntryNumber<<std::endl;
 
   // If this function is called by AcceptEvent, trees are fast at re-returning an already-gotten entry.
@@ -130,7 +129,6 @@ void EventFinisher::FinishEvent(EventHandler* event)
       // Take the Fourier transform.
       EXODoubleWaveform dwf = wf->Convert<Double_t>();
       EXOWaveformFT fwf;
-      // Note: not thread-safe (we use a buffer), but covered by RootInterfaceMutex.
       EXOFastFourierTransformFFTW::GetFFT(dwf.GetLength()).PerformFFT(dwf, fwf);
 
       // Extract the real part.

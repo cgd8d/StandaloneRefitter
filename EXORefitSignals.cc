@@ -50,9 +50,9 @@
 // We currently use the boost::threads library, if threading is enabled.
 #include <boost/thread/thread.hpp>
 #include <boost/thread/detail/thread_group.hpp>
+#include <boost/thread/mutex.hpp>
 
 // Create basic mutexes for two multiple-writer situations.
-boost::mutex RootInterfaceMutex; // Mutex for processed event handling and everything that involves.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
 static boost::mutex SaveToPushMutex; // We can't use MPI across threads 
 
