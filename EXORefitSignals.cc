@@ -54,7 +54,6 @@
 
 // Create basic mutexes for two multiple-writer situations.
 boost::mutex RequestNoiseMulMutex; // Currently events are appended to the request queue.
-static boost::mutex SaveToPushMutex; // We can't use MPI across threads 
 
 // And a mutex for writing debugging output from threaded parts of the code.
 boost::mutex CoutMutex;
@@ -80,6 +79,7 @@ EXORefitSignals::EXORefitSignals()
   fNumMulsToAccumulate(500),
   fLightmapFilename("data/lightmap/LightMaps.root"),
   fRThreshold(0.1),
+  fSaveToPushEH(0),
   fEventHandlerQueue(0), // The default lockfree constructor is not allowed.
   fEventHandlerResults(0), // http://boost.2283326.n4.nabble.com/lockfree-Faulty-static-assert-td4635029.html
   fNumVectorsInQueue(0)
@@ -813,19 +813,15 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   // Push event onto the list of event handlers.
   assert(fEventHandlerQueue.unsynchronized_push(event));
 
-  // Ensure that fEventHandlerResults has enough nodes reserved to accept all of the queued events.
-  // Unfortunately, the only way I know to do this is really awkward.
+  // Ensure that fEventHandlerResults and fSaveToPushEH have enough nodes reserved
+  // to accept all of the queued events.
+  // Since fEventHandlerQueue's size *must* be <= fNumMulsToAccumulate (with equality only
+  // possible when events have just one signal, eg light-only denoising),
+  // we can reserve fNumMulsToAccumulate entries and be safe.
+  // If we ever violate this reasoning, an assertion will fail.
   assert(fEventHandlerResults.empty());
-  while(not fEventHandlerQueue.empty()) {
-    EventHandler* evt = NULL;
-    assert(fEventHandlerQueue.unsynchronized_pop(evt));
-    assert(fEventHandlerResults.unsynchronized_push(evt));
-  }
-  while(not fEventHandlerResults.empty()) {
-    EventHandler* evt = NULL;
-    assert(fEventHandlerResults.unsynchronized_pop(evt));
-    assert(fEventHandlerQueue.unsynchronized_push(evt));
-  }
+  fEventHandlerResults.reserve_unsafe(fNumMulsToAccumulate);
+  fSaveToPushEH.reserve_unsafe(fNumMulsToAccumulate);
   BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
 
   // Now, while there are enough requests in the queue, satisfy those requests.
@@ -1400,12 +1396,7 @@ void EXORefitSignals::DoPassThroughEvents()
     assert(fEventHandlerQueue.unsynchronized_push(evt));
   }
 
-  // We're serial here, don't lock
-  while (not fSaveToPushEH.empty()) {
-    EHSet::iterator it = fSaveToPushEH.begin();
-    FinishProcessedEvent(*it);
-    fSaveToPushEH.erase(it); 
-  }
+  fSaveToPushEH.consume_all(boost::bind(&EXORefitSignals::FinishProcessedEvent, this, _1));
   DoPassWatch.Stop(DoPassTag);
 }
 
@@ -1483,10 +1474,7 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
   std::vector<double>().swap(event->fV);
   std::vector<double>().swap(event->fprecon_tmp);
 
-  #ifdef USE_THREADS 
-  boost::mutex::scoped_lock sL(SaveToPushMutex); 
-  #endif
-  fSaveToPushEH.insert(event);
+  assert(fSaveToPushEH.bounded_push(event));
 }
 
 void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
