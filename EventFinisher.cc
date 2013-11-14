@@ -267,10 +267,11 @@ void EventFinisher::ListenForArrivingEvents()
 #else
     // Otherwise, do a busy (but not too busy) wait.
     boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
-    boost::optional<boost::mpi::status> s;
-    while ( ! (s = req.test()) ) {
+    boost::optional<boost::mpi::status> s_opt;
+    while ( ! (s_opt = req.test()) ) {
       boost::this_thread::sleep(boost::posix_time::millisec(1));
     }
+    boost::mpi::status& s = s_opt.get();
 #endif
     if(s.tag()) {
 #ifdef USE_SHARED_MEMORY
