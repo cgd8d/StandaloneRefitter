@@ -1,6 +1,7 @@
 #ifndef EventHandler_hh
 #define EventHandler_hh
 
+#include "ModelManager.hh"
 #include "Rtypes.h"
 #include "mkl_lapacke.h"
 #include <vector>
@@ -23,20 +24,13 @@ struct EventHandler {
   std::vector<unsigned char> fChannels;
 
 #ifdef ENABLE_CHARGE
-  // fWireModel keeps, for each u-wire signal we're fitting:
-  //   the index of the u-wire signal within the event.
-  //   model waveforms for channels which it affects.
-  // The map keys are software channels.
-  // The model waveforms are normalized so that the shaped deposition has a peak-baseline of 1 ADC.
-  // The ordering in the matrix is defined by the vector index, of course.
-  std::vector<std::pair<size_t,
-                        std::map<unsigned char, std::vector<double> > > > fWireModel;
+  std::vector<ModelManager> fWireModel; // U-wire model information.
 #endif
-  // APD model information.
-  std::map<unsigned char, double> fExpectedYieldPerGang; // Expected magnitudes of Th gamma line (ADC).
-  std::vector<double> fmodel_realimag;
+  std::vector<ModelManager> fAPDModel; // APD model information.
   double fExpectedEnergy_keV; // For appropriate handling of Poisson noise.
   std::map<unsigned char, double> fAPDGainMapEval;
+
+  std::vector<ModelManager*> fModels; // Pointers to APD and u-wire models.
 
   // Information on the current status and data of the solver.
   // We need enough information so that when a matrix multiplication with noise finishes,
@@ -77,8 +71,9 @@ struct EventHandler {
     ar & fNumSignals;
     ar & fChannels;
 #ifdef USE_CHARGE
-    ar & fWireModel; // Only actually needed for its length.
+    ar & fWireModel;
 #endif
+    ar & fAPDModel;
     ar & fX;
   }
 };

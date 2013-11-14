@@ -576,30 +576,6 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
     return;
   }
 
-  // For now, we also only deal with events containing *exactly* one scintillation cluster.
-  // There's nothing theoretical that warrants this; it's just easier to code up.
-  if(ED->GetNumScintillationClusters() != 1) {
-    FinishProcessedEvent(event);
-    BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
-    return;
-  }
-  EXOScintillationCluster* scint = ED->GetScintillationCluster(0);
-
-  // If there are no fully-reconstructed clusters, then we can't do anything -- so, skip them too.
-  // Otherwise, extract a list of clusters for future convenience.
-  std::vector<EXOChargeCluster*> FullClusters;
-  for(size_t i = 0; i < scint->GetNumChargeClusters(); i++) {
-    EXOChargeCluster* clu = scint->GetChargeClusterAt(i);
-    if(std::abs(clu->fX) > 200 or std::abs(clu->fY) > 200 or std::abs(clu->fZ) > 200) continue;
-    if(clu->fPurityCorrectedEnergy < 1) continue;
-    FullClusters.push_back(clu);
-  }
-  if(FullClusters.empty()) {
-    FinishProcessedEvent(event);
-    BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
-    return;
-  }
-
   // If necessary, extract the noise correlations object with a proper ordering.
   FillNoiseCorrelations(*ED);
 
@@ -607,73 +583,110 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fUnixTimeOfEvent = double(ED->fEventHeader.fTriggerSeconds);
   event->fUnixTimeOfEvent += double(ED->fEventHeader.fTriggerMicroSeconds)/1e6;
 
-  // Given the positions of the clusters, estimate how the light should be distributed among gangs.
-  // ExpectedYieldPerGang will be the expected peak-baseline (ADC counts) of a 2615 keV event.
-  event->fExpectedYieldPerGang.clear();
-  event->fExpectedEnergy_keV = 0;
-  for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
-    event->fExpectedYieldPerGang[fChannels[i]] = 0;
-    event->fAPDGainMapEval[fChannels[i]] = fGainMaps[fChannels[i]]->Eval(event->fUnixTimeOfEvent);
-  }
-  for(size_t i = 0; i < FullClusters.size(); i++) {
-    EXOChargeCluster* clu = FullClusters[i];
-    event->fExpectedEnergy_keV += clu->fPurityCorrectedEnergy;
-    for(size_t j = fFirstAPDChannelIndex; j < fChannels.size(); j++) {
-      unsigned char gang = fChannels[j];
-      Double_t GainFuncVal = event->fAPDGainMapEval[gang];
+  // Loop through the scintillation clusters; form a model for each.
+  // If we fail to generate a model for any scintillation cluster, skip the whole event --
+  // Otherwise, we risk generating bad scintillation clusters for the events we keep.
+  for(size_t iscint = 0; iscint < ED->GetNumScintillationClusters(); iscint++) {
+    EXOScintillationCluster* scint = ED->GetScintillationCluster(iscint);
 
-      // Make sure cluster is in the proper range for interpolation -- else return 0.
-      Double_t LightMapVal;
-      TAxis* Xaxis = fLightMaps[gang]->GetXaxis();
-      TAxis* Yaxis = fLightMaps[gang]->GetYaxis();
-      TAxis* Zaxis = fLightMaps[gang]->GetZaxis();
-      if(Xaxis->GetBinCenter(1) <= clu->fX and clu->fX < Xaxis->GetBinCenter(Xaxis->GetNbins()) and
-         Yaxis->GetBinCenter(1) <= clu->fY and clu->fY < Yaxis->GetBinCenter(Yaxis->GetNbins()) and
-         Zaxis->GetBinCenter(1) <= clu->fZ and clu->fZ < Zaxis->GetBinCenter(Zaxis->GetNbins())) {
-        LightMapVal = fLightMaps[gang]->Interpolate(clu->fX, clu->fY, clu->fZ);
-      }
-      else {
-        // Interpolate would return 0, and I'm actually OK with that -- but I still want to kill the warning.
-        LightMapVal = 0;
-      }
-
-      event->fExpectedYieldPerGang[gang] += LightMapVal*GainFuncVal*clu->fPurityCorrectedEnergy;
+    // If there are no fully-reconstructed clusters, then we can't do anything -- so, skip them too.
+    // Otherwise, extract a list of clusters for future convenience.
+    std::vector<EXOChargeCluster*> FullClusters;
+    for(size_t i = 0; i < scint->GetNumChargeClusters(); i++) {
+      EXOChargeCluster* clu = scint->GetChargeClusterAt(i);
+      if(std::abs(clu->fX) > 200 or std::abs(clu->fY) > 200 or std::abs(clu->fZ) > 200) continue;
+      if(clu->fPurityCorrectedEnergy < 1) continue;
+      FullClusters.push_back(clu);
     }
-  }
-  // We just want to weight the clusters appropriately when we guess where light should be collected.
-  // Divide out to ensure that at the end, a result of 1 corresponds to a 2615 keV event (roughly).
-  for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
-    event->fExpectedYieldPerGang[fChannels[i]] /= event->fExpectedEnergy_keV;
-  }
+    if(FullClusters.empty()) {
+      FinishProcessedEvent(event);
+      BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
+      return;
+    }
 
-  // If we don't expect any yield, then clearly there will be a degenerate matrix.
-  // So, instead drop such events.
-  // (Specifically, if a 2615 keV event would produce less than 1ADC on every gang, drop it.)
-  bool HasYield = false;
-  for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
-    if(event->fExpectedYieldPerGang[fChannels[i]] > 1) HasYield = true;
-  }
-  if(not HasYield) {
-    FinishProcessedEvent(event);
-    BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
-    return;
-  }
+    // Given the positions of the clusters, estimate how the light should be distributed among gangs.
+    // ExpectedYieldPerGang will be the expected peak-baseline (ADC counts) of a 2615 keV event.
+    std::map<unsigned char, double> ExpectedYieldPerGang;
+    event->fExpectedEnergy_keV = 0;
+    for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
+      ExpectedYieldPerGang[i] = 0;
+      event->fAPDGainMapEval[fChannels[i]] = fGainMaps[fChannels[i]]->Eval(event->fUnixTimeOfEvent);
+    }
+    for(size_t i = 0; i < FullClusters.size(); i++) {
+      EXOChargeCluster* clu = FullClusters[i];
+      event->fExpectedEnergy_keV += clu->fPurityCorrectedEnergy;
+      for(size_t j = fFirstAPDChannelIndex; j < fChannels.size(); j++) {
+        unsigned char gang = fChannels[j];
+        Double_t GainFuncVal = event->fAPDGainMapEval[gang];
 
-  // Generate the expected light signal shape (normalized), given the time of the scintillation.
-  // Alternate between real and imaginary parts, mimicking the variable ordering we use throughout.
-  // Also drop the zero-frequency component (which isn't used)
-  // and the last imaginary component (which is identically zero).
-  EXOWaveformFT modelFT = GetModelForTime(scint->fTime);
-  event->fmodel_realimag.resize(2*modelFT.GetLength() - 3);
-  for(size_t i = 1; i < modelFT.GetLength(); i++) {
-    event->fmodel_realimag[2*i - 2] = modelFT[i].real();
-    if(i != modelFT.GetLength()-1) event->fmodel_realimag[2*i - 1] = modelFT[i].imag();
-  }
-  event->fNumSignals += 1;
+        // Make sure cluster is in the proper range for interpolation -- else return 0.
+        Double_t LightMapVal;
+        TAxis* Xaxis = fLightMaps[gang]->GetXaxis();
+        TAxis* Yaxis = fLightMaps[gang]->GetYaxis();
+        TAxis* Zaxis = fLightMaps[gang]->GetZaxis();
+        if(Xaxis->GetBinCenter(1) <= clu->fX and clu->fX < Xaxis->GetBinCenter(Xaxis->GetNbins()) and
+           Yaxis->GetBinCenter(1) <= clu->fY and clu->fY < Yaxis->GetBinCenter(Yaxis->GetNbins()) and
+           Zaxis->GetBinCenter(1) <= clu->fZ and clu->fZ < Zaxis->GetBinCenter(Zaxis->GetNbins())) {
+          LightMapVal = fLightMaps[gang]->Interpolate(clu->fX, clu->fY, clu->fZ);
+        }
+        else {
+          // Interpolate would return 0, and I'm actually OK with that -- but I still want to kill the warning.
+          LightMapVal = 0;
+        }
+
+        ExpectedYieldPerGang[j] += LightMapVal*GainFuncVal*clu->fPurityCorrectedEnergy;
+      }
+    }
+    // We just want to weight the clusters appropriately when we guess where light should be collected.
+    // Divide out to ensure that at the end, a result of 1 corresponds to a 2615 keV event (roughly).
+    for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
+      ExpectedYieldPerGang[i] /= event->fExpectedEnergy_keV;
+    }
+
+    // If we don't expect any yield, then clearly there will be a degenerate matrix.
+    // So, instead drop such events.
+    // (Specifically, if a 2615 keV event would produce less than 1ADC on every gang, drop it.)
+    bool HasYield = false;
+    for(size_t i = fFirstAPDChannelIndex; i < fChannels.size(); i++) {
+      if(ExpectedYieldPerGang[i] > 1) HasYield = true;
+    }
+    if(not HasYield) {
+      FinishProcessedEvent(event);
+      BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
+      return;
+    }
+
+    // Generate the expected light signal shape (normalized), given the time of the scintillation.
+    // Alternate between real and imaginary parts, mimicking the variable ordering we use throughout.
+    // Also drop the zero-frequency component (which isn't used)
+    // and the last imaginary component (which is identically zero).
+    EXOWaveformFT modelFT = GetModelForTime(scint->fTime);
+    std::vector<double> model_realimag(2*modelFT.GetLength() - 3);
+    for(size_t i = 1; i < modelFT.GetLength(); i++) {
+      model_realimag[2*i - 2] = modelFT[i].real();
+      if(i != modelFT.GetLength()-1) model_realimag[2*i - 1] = modelFT[i].imag();
+    }
+
+    // Compute the expected signals, and load them into event.
+    ModelManager modelManager(fNoiseColumnLength, fChannels.size());
+    modelManager.fSignalNumber = iscint;
+    for(std::map<unsigned char, double>::iterator it = ExpectedYieldPerGang.begin();
+        it != ExpectedYieldPerGang.end();
+        it++) {
+      unsigned char ChannelIndex = it->first;
+      std::vector<double> model;
+      model.reserve(model_realimag.size());
+      for(size_t j = 0; j < model_realimag.size(); j++) model.push_back(it->second * model_realimag[j]);
+      modelManager.AddChannelHit(ChannelIndex, model);
+    }
+    modelManager.Finalize(fInvSqrtNoiseDiag);
+    modelManager.fExpectedYieldPerGang = ExpectedYieldPerGang;
+    event->fAPDModel.push_back(modelManager);
+    event->fNumSignals += 1;
+  } // Done generating light signals.
 
 #ifdef ENABLE_CHARGE
   // Now produce the expected wire signals.
-  event->fWireModel.clear();
   if(not fAPDsOnly) {
     std::set<size_t> UWireSignals;
     std::map<Int_t, std::set<Double_t> > EnsureNoDegeneracy;
@@ -716,40 +729,47 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
         sigIt != UWireSignals.end();
         sigIt++) {
       EXOUWireSignal* sig = ED->GetUWireSignal(*sigIt);
+      unsigned char channelIndex;
 
-      std::map<unsigned char, std::vector<double> > ModelForThisSignal;
+      ModelManager modelManager(fNoiseColumnLength, fChannels.size());
+      //std::map<unsigned char, std::vector<double> >& ModelForThisSignal = modelManager.fModelMap;
 
       // Deposit channel.
       const EXOTransferFunction& transferDep =
         electronicsShapers->GetTransferFunctionForChannel(sig->fChannel);
       double Gain = transferDep.GetGain();
       double DepChanGain = GainsFromDatabase->GetGainOnChannel(sig->fChannel);
-      ModelForThisSignal[sig->fChannel] = MakeWireModel(fWireDeposit,
-                                                        transferDep,
-                                                        Gain,
-                                                        sig->fTime);
+      channelIndex = *std::find(fChannels.begin(), fChannels.end(), sig->fChannel);
+      modelManager.AddChannelHit(channelIndex, MakeWireModel(fWireDeposit,
+                                                             transferDep,
+                                                             Gain,
+                                                             sig->fTime));
 
       if(EXOMiscUtil::TypeOfChannel(sig->fChannel-1) == EXOMiscUtil::kUWire) {
         const EXOTransferFunction& transferInd =
           electronicsShapers->GetTransferFunctionForChannel(sig->fChannel-1);
         double ThisChanGain = Gain * GainsFromDatabase->GetGainOnChannel(sig->fChannel-1)/DepChanGain;
-        ModelForThisSignal[sig->fChannel-1] = MakeWireModel(fWireInduction,
-                                                            transferInd,
-                                                            ThisChanGain,
-                                                            sig->fTime);
+        channelIndex = *std::find(fChannels.begin(), fChannels.end(), sig->fChannel-1);
+        modelManager.AddChannelHit(channelIndex, MakeWireModel(fWireInduction,
+                                                               transferInd,
+                                                               ThisChanGain,
+                                                               sig->fTime));
       }
 
       if(EXOMiscUtil::TypeOfChannel(sig->fChannel+1) == EXOMiscUtil::kUWire) {
         const EXOTransferFunction& transferInd =
           electronicsShapers->GetTransferFunctionForChannel(sig->fChannel+1);
         double ThisChanGain = Gain * GainsFromDatabase->GetGainOnChannel(sig->fChannel+1)/DepChanGain;
-        ModelForThisSignal[sig->fChannel+1] = MakeWireModel(fWireInduction,
-                                                            transferInd,
-                                                            ThisChanGain,
-                                                            sig->fTime);
+        channelIndex = *std::find(fChannels.begin(), fChannels.end(), sig->fChannel+1);
+        modelManager.AddChannelHit(channelIndex, MakeWireModel(fWireInduction,
+                                                               transferInd,
+                                                               ThisChanGain,
+                                                               sig->fTime));
       }
 
-      event->fWireModel.push_back(std::make_pair(*sigIt, ModelForThisSignal));
+      modelManager.fSignalNumber = *sigIt;
+      modelManager.Finalize(fInvSqrtNoiseDiag);
+      event->fWireModel.push_back(modelManager);
     } // End loop over u-wire signals.
   } // (which we only did if we're handling wire signals.
   event->fNumSignals += event->fWireModel.size();
@@ -757,6 +777,13 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
   // For convenience, store the column length we'll be dealing with.
   event->fColumnLength = 2*fChannels.size()*(MAX_F-MIN_F) + fChannels.size() + event->fNumSignals;
+
+  // Also for convenience, make a vector which maintains the relative ordering of APD and wire models.
+  for(size_t i = 0; i < event->fAPDModel.size(); i++) event->fModels.push_back(&event->fAPDModel.at(i));
+#ifdef USE_CHARGE
+  for(size_t i = 0; i < event->fWireModel.size(); i++) event->fModels.push_back(&event->fWireModel.at(i));
+#endif
+  assert(event->fNumSignals == event->fModels.size());
 
   // We can find the appropriate preconditioner here.
   // This is a pretty good preconditioner, obtained by approximating A ~ {{D L} {trans(L) 0}},
@@ -1107,53 +1134,41 @@ void EXORefitSignals::DoPoissonMultiplication(const std::vector<double>& in,
                                               EventHandler& event)
 {
   // Poisson terms for APD channels.
-  for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) { // APD gangs
-    double ChannelFactors = event.fExpectedEnergy_keV/THORIUM_ENERGY_KEV;
-    ChannelFactors *= GetGain(fChannels[k], event);
-    ChannelFactors *= event.fExpectedYieldPerGang.at(fChannels[k]);
+  for(size_t m = 0; m < event.fAPDModel.size(); m++) {
+    const ModelManager& modelManager = event.fAPDModel.at(m);
+    assert(modelManager.fNumChannels == fChannels.size());
+    for(size_t n = 0; n < event.fNumSignals; n++) {
 
-    for(size_t n = 0; n < event.fNumSignals; n++) { // signals
-      // Compute the factors common to all frequencies.
-      double CommonFactor = 0;
-      for(size_t f = 0; f < MAX_F - MIN_F; f++) {
-        size_t DiagIndex = 2*fChannels.size()*f + k;
-        size_t InIndex = n*event.fColumnLength + DiagIndex;
-        CommonFactor += event.fmodel_realimag[2*f] * in[InIndex] *
-                        fInvSqrtNoiseDiag[DiagIndex];
-        CommonFactor += event.fmodel_realimag[2*f+1] * in[InIndex+fChannels.size()] *
-                        fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
-      }
-      {
-        // For g == MAX_F - MIN_F, we only deal with the real part.
-        // Explicitly perform this iteration separately to avoid having a branch in the inner loop.
-        size_t f = MAX_F - MIN_F;
-        size_t DiagIndex = 2*fChannels.size()*f + k;
-        size_t InIndex = n*event.fColumnLength + DiagIndex;
-        CommonFactor += event.fmodel_realimag[2*f] * in[InIndex] *
-                        fInvSqrtNoiseDiag[DiagIndex];
-      }
-      CommonFactor *= ChannelFactors;
+      // Exploit ranges of contiguous channels which are hit by this signal.
+      const std::set<std::pair<unsigned char, unsigned char> >& contigChannels =
+        modelManager.fContiguousChannels;
+      for(std::set<std::pair<unsigned char, unsigned char> >::const_iterator it = contigChannels.begin();
+          it != contigChannels.end();
+          it++) {
+        std::vector<double> CommonFactors(it->second - it->first, 0);
 
-      // Now actually transfer the changes to the out vector.
-      for(size_t f = 0; f < MAX_F - MIN_F; f++) {
-        size_t DiagIndex = 2*fChannels.size()*f + k;
-        size_t OutIndex = n*event.fColumnLength + DiagIndex;
-        out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] *
-                         fInvSqrtNoiseDiag[DiagIndex];
-        out[OutIndex+fChannels.size()] += CommonFactor * event.fmodel_realimag[2*f+1] *
-                         fInvSqrtNoiseDiag[DiagIndex+fChannels.size()];
-      }
-      {
-        // For f == MAX_F - MIN_F, we only deal with the real part.
-        // Explicitly perform this iteration separately to avoid having a branch in the inner loop.
-        size_t f = MAX_F - MIN_F;
-        size_t DiagIndex = 2*fChannels.size()*f + k;
-        size_t OutIndex = n*event.fColumnLength + DiagIndex;
-        out[OutIndex] += CommonFactor * event.fmodel_realimag[2*f] *
-                         fInvSqrtNoiseDiag[DiagIndex];
+        for(size_t f = 0; f < 2*(MAX_F-MIN_F)+1; f++) {
+          size_t StartIndex = f*fChannels.size() + it->first;
+          for(unsigned char i = 0; i < CommonFactors.size(); i++) {
+            CommonFactors[i] += in[event.fColumnLength*n+StartIndex+i] * modelManager.fModel[StartIndex+i];
+          }
+        }
+
+        for(size_t i = 0; i < CommonFactors.size(); i++) {
+          CommonFactors[i] *= event.fExpectedEnergy_keV/THORIUM_ENERGY_KEV;
+          CommonFactors[i] *= GetGain(fChannels[it->first + i], event);
+          CommonFactors[i] /= modelManager.fExpectedYieldPerGang.at(it->first + i);
+        }
+
+        for(size_t f = 0; f < 2*(MAX_F-MIN_F)+1; f++) {
+          size_t StartIndex = f*fChannels.size() + it->first;
+          for(unsigned char i = 0; i < CommonFactors.size(); i++) {
+            out[event.fColumnLength*n+StartIndex+i] += CommonFactors[i] * modelManager.fModel[StartIndex+i];
+          }
+        }
       }
     }
-  } // End Poisson terms.
+  }
 }
 
 void EXORefitSignals::DoNoiseMultiplication()

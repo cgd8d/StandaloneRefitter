@@ -85,16 +85,19 @@ void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<
 #ifdef ENABLE_CHARGE
     if(not fAPDsOnly) {
       for(size_t i = 0; i < event->fWireModel.size(); i++) {
-        size_t sigIndex = event->fWireModel[i].first;
+        size_t sigIndex = event->fWireModel[i].fSignalNumber;
         EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
         double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
                                     (CLHEP::keV * ADC_BITS);
-        sig->fDenoisedEnergy = Results[i]*UWireScalingFactor;
+        sig->fDenoisedEnergy = Results[event->fAPDModel.size() + i]*UWireScalingFactor;
       }
     }
 #endif
-    ED->GetScintillationCluster(0)->fDenoisedEnergy = Results.back()*THORIUM_ENERGY_KEV;
-    ED->GetScintillationCluster(0)->fRawEnergy = ED->GetScintillationCluster(0)->fDenoisedEnergy;
+    for(size_t i = 0; i < event->fAPDModel.size(); i++) {
+      size_t sigIndex = event->fAPDModel[i].fSignalNumber;
+      ED->GetScintillationCluster(sigIndex)->fDenoisedEnergy = Results[i]*THORIUM_ENERGY_KEV;
+      ED->GetScintillationCluster(sigIndex)->fRawEnergy = ED->GetScintillationCluster(sigIndex)->fDenoisedEnergy;
+    }
   }
 
   fOutputModule.ProcessEvent(ED);

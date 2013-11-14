@@ -160,7 +160,7 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   // If WHICH = 'A', do both.
   // All other values of WHICH result in an error.  (This is done to force compile-time optimization.)
   // In and out should only be equal if WHICH != 'A'.
-  // We also package the "preconditioning" matrix, so this actually does:
+  // We also package the "preconditioning" matrix with the models, so this actually does:
   // (0                D^(-1/2)L)
   // (trans(L)D^(-1/2) 0        )
   // If Add is true (default), we add this to out; otherwise, we subtract it.
@@ -169,88 +169,34 @@ void EXORefitSignals::DoLagrangeAndConstraintMul(const std::vector<double>& in,
   bool Lagrange = (WHICH == 'L' or WHICH == 'A');
   bool Constraint = (WHICH == 'C' or WHICH == 'A');
 
-#ifdef ENABLE_CHARGE
-  // First loop through wire signals.
-  for(size_t m = 0; m < event.fWireModel.size(); m++) {
-    const std::map<unsigned char, std::vector<double> >& models = event.fWireModel[m].second;
-    for(std::map<unsigned char, std::vector<double> >::const_iterator it = models.begin();
-        it != models.end();
+  for(size_t m = 0; m < event.fModels.size(); m++) {
+    const ModelManager& modelManager = *event.fModels.at(m);
+    assert(modelManager.fNumChannels == fChannels.size());
+
+    // Exploit ranges of contiguous channels which are hit by this signal.
+    const std::set<std::pair<unsigned char, unsigned char> >& contigChannels =
+      modelManager.fContiguousChannels;
+    for(std::set<std::pair<unsigned char, unsigned char> >::const_iterator it = contigChannels.begin();
+        it != contigChannels.end();
         it++) {
-      unsigned char ChannelWithWireSignal = it->first;
-      size_t channel_index = 0;
-      while(fChannels[channel_index] != ChannelWithWireSignal) {
-        channel_index++;
-        if(channel_index >= fChannels.size()) {
-          std::cout<<"On entry "<<event.fEntryNumber<<", in DoLagrangeAndConstraintMul, "<<
-                     "Index exceeded -- why can this happen?"<<std::endl;
-          std::exit(1);
+      for(size_t f = 0; f < 2*(MAX_F-MIN_F)+1; f++) {
+        if(Constraint) {
+          cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                      1, event.fNumSignals, it->second - it->first,
+                      (Add ? 1 : -1),
+                      &modelManager.fModel[f*fChannels.size() + it->first], 1,
+                      &in[f*fChannels.size() + it->first], event.fColumnLength,
+                      1, &out[fNoiseColumnLength + m], event.fColumnLength);
+        }
+        if(Lagrange) {
+          cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+                      it->second - it->first, event.fNumSignals, 1,
+                      (Add ? 1 : -1),
+                      &modelManager.fModel[f*fChannels.size() + it->first], fChannels.size(),
+                      &in[fNoiseColumnLength + m], event.fColumnLength,
+                      1, &out[f*fChannels.size() + it->first], event.fColumnLength);
         }
       }
-      const std::vector<double>& modelWF = it->second;
-      for(size_t f = 0; f <= MAX_F - MIN_F; f++) {
-        size_t Index1 = event.fColumnLength - event.fNumSignals + m;
-        size_t Index2 = 2*fChannels.size()*f + channel_index;
-        const size_t DiagIndex = Index2;
-        for(size_t n = 0; n < event.fNumSignals; n++) {
-          if(Lagrange) out[Index2] += (Add ? 1 : -1)*modelWF[2*f]*fInvSqrtNoiseDiag[DiagIndex]*in[Index1];
-          if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f]*fInvSqrtNoiseDiag[DiagIndex]*in[Index2];
-          if(f < MAX_F-MIN_F) {
-            if(Lagrange) out[Index2+fChannels.size()] += (Add ? 1 : -1)*modelWF[2*f+1]*fInvSqrtNoiseDiag[DiagIndex+fChannels.size()]*in[Index1];
-            if(Constraint) out[Index1] += (Add ? 1 : -1)*modelWF[2*f+1]*fInvSqrtNoiseDiag[DiagIndex+fChannels.size()]*in[Index2+fChannels.size()];
-          }
-          Index1 += event.fColumnLength;
-          Index2 += event.fColumnLength;
-        }
-      }
-    }
-  } // Done with Lagrange and constraint terms for wires.
-#endif
-  // Now, Lagrange and constraint terms for APDs.
-  // This is where most of the time is spent, because we need to loop through all APD channels.
-  // Furthermore, the APD channels are grouped together, making this portion of the code more matrix-friendly.
-  // So, we exploit MKL as much as possible.
-  std::vector<double> ExpectedYields;
-  for(size_t k = fFirstAPDChannelIndex; k < fChannels.size(); k++) {
-    ExpectedYields.push_back(event.fExpectedYieldPerGang.at(fChannels[k]));
-  }
-  std::vector<double> Workspace(ExpectedYields.size(), 0);
-  for(size_t f = 0; f <= MAX_F - MIN_F; f++) {
-    size_t StartIndex = 2*fChannels.size()*f + fFirstAPDChannelIndex;
-
-    // Start with real blocks.
-    vdMul(ExpectedYields.size(), &ExpectedYields[0], &fInvSqrtNoiseDiag[StartIndex], &Workspace[0]);
-    if(Constraint) {
-      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                  1, event.fNumSignals, ExpectedYields.size(),
-                  (Add ? 1 : -1)*event.fmodel_realimag[2*f], &Workspace[0], 1,
-                  &in[StartIndex], event.fColumnLength,
-                  1, &out[event.fColumnLength-1], event.fColumnLength);
-    }
-    if(Lagrange) {
-      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                  ExpectedYields.size(), event.fNumSignals, 1,
-                  (Add ? 1 : -1)*event.fmodel_realimag[2*f], &Workspace[0], ExpectedYields.size(),
-                  &in[event.fColumnLength-1], event.fColumnLength,
-                  1, &out[StartIndex], event.fColumnLength);
-    }
-
-    // Now do imaginary blocks.
-    if(f == MAX_F - MIN_F) continue;
-    StartIndex += fChannels.size();
-    vdMul(ExpectedYields.size(), &ExpectedYields[0], &fInvSqrtNoiseDiag[StartIndex], &Workspace[0]);
-    if(Constraint) {
-      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                  1, event.fNumSignals, ExpectedYields.size(),
-                  (Add ? 1 : -1)*event.fmodel_realimag[2*f+1], &Workspace[0], 1,
-                  &in[StartIndex], event.fColumnLength,
-                  1, &out[event.fColumnLength-1], event.fColumnLength);
-    }
-    if(Lagrange) {
-      cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
-                  ExpectedYields.size(), event.fNumSignals, 1,
-                  (Add ? 1 : -1)*event.fmodel_realimag[2*f+1], &Workspace[0], ExpectedYields.size(),
-                  &in[event.fColumnLength-1], event.fColumnLength,
-                  1, &out[StartIndex], event.fColumnLength);
     }
   }
 }
