@@ -9,14 +9,27 @@
 
 SUPPORT_LIBS := -Wl,-Bstatic -lboost_thread -lboost_atomic -lboost_timer -lboost_chrono -lboost_system -lboost_mpi -lboost_serialization -Wl,-Bdynamic 
 ifeq ($(NERSC_HOST),)
-  CXX := g++ -pthread
   EXO_LIBS :=-lEXOAnalysisManager -lEXOCalibUtilities -lEXOUtilities
-  THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=4
   FFTW_LDFLAGS := -L$(shell $(ROOTSYS)/bin/root-config --libdir)
-  ROOT_LIBS := -lRIO -lHist -lGraf -lTree -lNet -lXMLParser -lGpad -lTreePlayer
+  ROOT_LIBS := -lRIO -lHist -lGraf -lTree -lNet -lXMLParser -lGpad -lTreePlayer -lNetx
+ifeq ($(WWW_HOME),http://www.slac.stanford.edu/)
+  # Running on SLAC, presumably rhel6-64.
+  CXX := mpic++ -pthread
+  LD := mpic++ -pthread
+  THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=14
+  MKL_CFLAGS := -I$(MKL_INC)
+  MKL_LIBFLAGS := -L$(MKL_LIBDIR)
+  MKL_LIBS := -Wl,-Bstatic -Wl,--start-group \
+              -lmkl_intel_lp64 -lmkl_sequential -lmkl_core \
+              -Wl,--end-group -Wl,-Bdynamic
+else
+  # I think this essentially means we're on Mike's machine.
+  CXX := g++ -pthread
+  THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=4
   MKL_CFLAGS := -mkl=sequential
   MKL_LIBFLAGS := -mkl=sequential
   MKL_LIBS :=
+endif
 else
   CXX := CC -std=c++11
   LD := CC -dynamic 
