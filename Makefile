@@ -14,8 +14,8 @@ ifeq ($(NERSC_HOST),)
   THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=4
   FFTW_LDFLAGS := -L$(shell $(ROOTSYS)/bin/root-config --libdir)
   ROOT_LIBS := -lRIO -lHist -lGraf -lTree -lNet -lXMLParser -lGpad -lTreePlayer
-  MKL_CFLAGS := -mkl
-  MKL_LIBFLAGS := -mkl
+  MKL_CFLAGS := -mkl=sequential
+  MKL_LIBFLAGS := -mkl=sequential
   MKL_LIBS :=
 else
   CXX := CC -std=c++11
@@ -37,8 +37,8 @@ else
   endif
   ifeq ($(NERSC_HOST),hopper)
      THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=6 -DUSE_SHARED_MEMORY
-     MKL_CFLAGS := -mkl
-     MKL_LIBFLAGS := -mkl
+     MKL_CFLAGS := -mkl=sequential
+     MKL_LIBFLAGS := -mkl=sequential
   else ifeq ($(NERSC_HOST),edison)
      THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=12 -DUSE_SHARED_MEMORY
      MKL_CFLAGS := -I$(MKL_INC)
