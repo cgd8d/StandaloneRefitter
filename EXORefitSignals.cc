@@ -860,6 +860,14 @@ void EXORefitSignals::FlushEvents()
   // Finish processing for all events in the event handler list,
   // regardless of how many pending multiplication requests are queued.
   while(not fEventHandlerQueue.empty()) DoPassThroughEvents();
+
+  // Don't return until asynchronous sends have also completed.
+  while(not fPendingSends.empty()) {
+    std::list<std::pair<boost::mpi::request, EventHandler*> >::iterator it = fPendingSends.begin();
+    it->first.wait();
+    delete it->second;
+    fPendingSends.erase(it);
+  }
 }
 
 bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
@@ -1411,7 +1419,19 @@ void EXORefitSignals::DoPassThroughEvents()
     assert(fEventHandlerQueue.unsynchronized_push(evt));
   }
 
+  // Initiate send requests of finished events to the finisher process.
   fSaveToPushEH.consume_all(boost::bind(&EXORefitSignals::FinishProcessedEvent, this, _1));
+
+  // Clear out any completed send requests.
+  std::list<std::pair<boost::mpi::request, EventHandler*> >::iterator it = fPendingSends.begin();
+  while(it != fPendingSends.end()) {
+    if(it->first.test().is_initialized()) {
+      delete it->second;
+      it = fPendingSends.erase(it);
+    }
+    else it++;
+  }
+
   DoPassWatch.Stop(DoPassTag);
 }
 
@@ -1507,7 +1527,7 @@ void EXORefitSignals::FinishProcessedEvent(EventHandler* event)
                                                           0);
   IOSemaphore.post();
 #endif
-  gMPIComm.send(gMPIComm.rank()+1, 0, *event);
-  delete event;
+  fPendingSends.push_back(std::make_pair(gMPIComm.isend(gMPIComm.rank()+1, 0, *event),
+                                         event));
   watch.Stop(tag);
 }

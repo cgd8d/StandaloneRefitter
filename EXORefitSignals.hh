@@ -8,10 +8,12 @@
 #include "mkl_cblas.h"
 #include "mkl_lapacke.h"
 #include "mkl_vml_functions.h"
+#include <boost/mpi/request.hpp>
 #include <string>
 #include <vector>
 #include <set>
 #include <map>
+#include <list>
 #include <cassert>
 
 class EventFinisher;
@@ -107,6 +109,7 @@ class EXORefitSignals
 
   void PushFinishedEvent(EventHandler* event);
   void FinishProcessedEvent(EventHandler* event);
+  std::list<std::pair<boost::mpi::request, EventHandler*> > fPendingSends;
 
   // Block BiCGSTAB algorithm.
   bool DoBlBiCGSTAB(EventHandler& event);
