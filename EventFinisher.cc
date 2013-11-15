@@ -30,7 +30,8 @@ EventFinisher::EventFinisher(EXOTreeInputModule& inputModule, std::string RawFil
   fInputModule(inputModule),
   fWaveformFile(RawFileName.c_str()),
   fDesiredQueueLength(2000),
-  fProcessingIsDone(false)
+  fProcessingIsDone(false),
+  fHasAskedForPause(false)
 {
   fWaveformTree = dynamic_cast<TTree*>(fWaveformFile.Get("tree"));
   fWaveformTree->GetBranch("fWaveformData")->SetAddress(&fWFData);
@@ -43,15 +44,15 @@ void EventFinisher::QueueEvent(EventHandler* eventHandler)
 {
   // Take ownership of an event; don't actually finish it yet,
   // but insert it into out set of events to finish.
-#ifdef USE_THREADS
-  boost::mutex::scoped_lock sL(fFinisherMutex);
-#endif
   fEventsToFinish.insert(eventHandler);
   if(fVerbose) std::cout<<"Queued an entry; queue length is "<<fEventsToFinish.size()<<std::endl;
-#ifdef USE_THREADS
-  assert(not fProcessingIsDone); // Certainly shouldn't be done, if we got here.
-  if(fEventsToFinish.size() >= fDesiredQueueLength) fFinisherCondition.notify_one();
-#endif
+
+  // If we've queued too many events, ask the compute process to give us a chance to catch up.
+  if(not fHasAskedForPause and fEventsToFinish.size() > 5000) {
+    if(fVerbose) std::cout<<"Asking the compute process to pause for a bit."<<std::endl;
+    gMPIComm.send(gMPIComm.rank() - 1, 1); // Please be merciful, and pause for a bit.
+    fHasAskedForPause = true;
+  }
 }
 
 void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<double>& Results)
@@ -171,45 +172,22 @@ void EventFinisher::Run()
 {
   // Call FinishEvent repeatedly until the queue is empty.
   // When the queue is empty, either return or sleep until more events are available.
-
-#ifdef USE_THREADS
-  boost::thread pull_data(&EventFinisher::ListenForArrivingEvents, this);
-#endif
-
-  bool HasAskedForPause = false;
-
   while(true) {
-#ifdef USE_THREADS
-    boost::mutex::scoped_lock sL(fFinisherMutex);
-#endif
 
-    // If we ever get behind, we need the ability to ask the compute process to pause for a bit.
-    // When we get caught up, we permit it to continue.
-    if(HasAskedForPause and fEventsToFinish.size() < 4000) {
+    // If we were behind, check if we've caught up.
+    if(fHasAskedForPause and fEventsToFinish.size() < 4000) {
       if(fVerbose) std::cout<<"Letting the compute process know that it can continue."<<std::endl;
       gMPIComm.send(gMPIComm.rank() - 1, 0); // OK for compute process to continue.
-      HasAskedForPause = false;
-    }
-    if(not HasAskedForPause and fEventsToFinish.size() > 5000) {
-      if(fVerbose) std::cout<<"Asking the compute process to pause for a bit."<<std::endl;
-      gMPIComm.send(gMPIComm.rank() - 1, 1); // Please be merciful, and pause for a bit.
-      HasAskedForPause = true;
+      fHasAskedForPause = false;
     }
 
-    // Force ourselves to wait until the finish-events queue has a certain length (or processing is done).
-    while(not fProcessingIsDone and
-          fEventsToFinish.size() < fDesiredQueueLength) {
-#ifdef USE_THREADS
-      fFinisherCondition.wait(sL);
-#else // not USE_THREADS -- we have to ask for another event within this thread.
-      ListenForArrivingEvents();
-#endif
-    }
+    // Always prioritize listening.
+    if(not fProcessingIsDone) ListenForArrivingEvents();
+
+    // When the listener returns, it's because we're ready to process; proceed.
     std::set<EventHandler*, CompareEventHandlerPtrs>::iterator it = fEventsToFinish.begin();
     if(it == fEventsToFinish.end()) {
-      // We assume only one io thread; in that case,
-      // if we weren't woken because there were events to finish,
-      // then we'd better have gotten here because processing is done.
+      // Listener should only return if we can process, or we're done.
       assert(fProcessingIsDone);
       fOutputModule.ShutDown();
       return;
@@ -217,35 +195,14 @@ void EventFinisher::Run()
 
     EventHandler* event = *it;
     fEventsToFinish.erase(it);
-
-#ifdef USE_THREADS
-    sL.unlock();
-#endif
     FinishEvent(event);
   } // while(true)
 }
 
-#ifdef USE_THREADS
-void EventFinisher::SetProcessingIsFinished()
-{
-  // Processing is completed, set and notify
-  boost::mutex::scoped_lock sL(fFinisherMutex);
-  fProcessingIsDone = true;
-  fFinisherCondition.notify_all();
-}
-#endif
-
-size_t EventFinisher::GetFinishEventQueueLength()
-{
-  // Number of events currently queued to be finished.
-#ifdef USE_THREADS
-  boost::mutex::scoped_lock sL(fFinisherMutex);
-#endif
-  return fEventsToFinish.size();
-}
-
 void EventFinisher::ListenForArrivingEvents()
 {
+  static EventHandler* eh = new EventHandler;
+  static boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
 
 #ifdef USE_SHARED_MEMORY
   std::ostringstream SemaphoreName;
@@ -253,41 +210,57 @@ void EventFinisher::ListenForArrivingEvents()
   static boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
                                                           SemaphoreName.str().c_str(),
                                                           0);
+  bool HasWaited = false; // To help us not double-wait.
 #endif
 
-#ifdef USE_THREADS
-  // If we're using threads, we'll wait until done.
   while (1)
-#endif // If we're not using threads, just receive once.
   {
-    EventHandler* eh = new EventHandler;
+    boost::optional<boost::mpi::status> s_opt = req.test();
+    if(s_opt.is_initialized()) {
+      // We received a message.
 #ifdef USE_SHARED_MEMORY
-    // If it's safe to have shared memory, use it to do an efficient wait.
-    IOSemaphore.wait();
-    boost::mpi::status s = gMPIComm.recv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
-#else
-    // Otherwise, do a busy (but not too busy) wait.
-    boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
-    boost::optional<boost::mpi::status> s_opt;
-    while ( ! (s_opt = req.test()) ) {
-      boost::this_thread::sleep(boost::posix_time::millisec(1));
-    }
-    boost::mpi::status& s = s_opt.get();
+      if(not HasWaited) IOSemaphore.wait(); // Just need to decrement; should be immediate.
+      else HasWaited = false; // We've spent the wait with this receive.
 #endif
-    if(s.tag()) {
+      boost::mpi::status& s = s_opt.get();
+      if(s.tag()) {
+        // This was the signal that we're done listening.
 #ifdef USE_SHARED_MEMORY
-      if(fVerbose) std::cout<<"Removing the named semaphore from the system."<<std::endl;
-      bool success = boost::interprocess::named_semaphore::remove(SemaphoreName.str().c_str());
-      assert(success);
+        if(fVerbose) std::cout<<"Removing the named semaphore from the system."<<std::endl;
+        bool success = boost::interprocess::named_semaphore::remove(SemaphoreName.str().c_str());
+        assert(success);
 #endif
-#ifdef USE_THREADS
-      SetProcessingIsFinished();
-#else
-      ProcessingIsDone = true;
-#endif
-      delete eh;
-      break;
+        fProcessingIsDone = true;
+        delete eh;
+        return;
+      }
+      else {
+        // Receive an event, then get ready for the next one.
+        QueueEvent(eh);
+        eh = new EventHandler;
+        req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
+        continue;
+      }
     }
-    QueueEvent(eh);
+    else {
+      // We haven't received a message.
+      // If we could be writing events, go back to doing that; else, wait.
+      if(fEventsToFinish.size() < fDesiredQueueLength) {
+#ifdef USE_SHARED_MEMORY
+        // We can take advantage of a shared semaphore to do a non-busy wait.
+        IOSemaphore.wait(); // MPI's wait is a busy wait; this should be more efficient.
+        HasWaited = true;
+#else
+        // We have no choice but to do a busy wait.
+        // But try to not make it too busy -- sleep for a moment.
+        boost::this_thread::sleep(boost::posix_time::millisec(1));
+        continue;
+#endif
+      }
+      else {
+        // We should go back to io.
+        return;
+      }
+    }
   }
 }

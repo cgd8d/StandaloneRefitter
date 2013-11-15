@@ -10,10 +10,6 @@
 #include <string>
 #include <set>
 
-#ifdef USE_THREADS
-#include <boost/thread/thread.hpp>
-#endif
-
 class EventFinisher
 {
  public:
@@ -23,15 +19,8 @@ class EventFinisher
   void FinishProcessedEvent(EventHandler* event, const std::vector<double>& Results = std::vector<double>());
 
   void Run();
-  size_t GetFinishEventQueueLength();
 
   void ListenForArrivingEvents();
-
-#ifdef USE_THREADS
-  void SetProcessingIsFinished();
-  boost::mutex fFinisherMutex;
-  boost::condition_variable fFinisherCondition;
-#endif
 
   bool fVerbose;
  private:
@@ -46,5 +35,6 @@ class EventFinisher
   std::set<EventHandler*, CompareEventHandlerPtrs> fEventsToFinish;
   size_t fDesiredQueueLength;
   bool fProcessingIsDone;
+  bool fHasAskedForPause;
 };
 #endif
