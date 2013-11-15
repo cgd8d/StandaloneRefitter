@@ -54,6 +54,17 @@ struct ModelManager
     }
   }
 
+  // Deallocate memory which is no longer needed when denoising is over.
+  // This can be called on an object which is about to be sent to the finisher,
+  // so that in the meanwhile we don't risk accumulating very much memory.
+  void Strip() {
+    // A simple clear doesn't force a deallocation, which is what we need here.
+    std::vector<double>().swap(fModel);
+    fHitChannels.clear();
+    fContiguousChannels.clear();
+    fExpectedYieldPerGang.clear();
+  }
+
   // The index number of this signal in EXOEventData, eg GetScintillationCluster(fSignalNumber).
   // Needed only so that when it is time to write the denoised magnitude,
   // we know where to put it.

@@ -1488,6 +1488,7 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
   std::vector<double>().swap(event->fR0hat);
   std::vector<double>().swap(event->fV);
   std::vector<double>().swap(event->fprecon_tmp);
+  for(size_t i = 0; i < event->fModels.size(); i++) event->fModels[i]->Strip();
 
   assert(fSaveToPushEH.bounded_push(event));
 }
