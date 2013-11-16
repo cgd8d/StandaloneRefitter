@@ -1,5 +1,5 @@
 #!/bin/bash
-#BSUB -n 16
+#BSUB -n 8
 #BSUB -q bulletmpi
 #BSUB -R span[hosts=1]
 #BSUB -o LogFiles/Job0000.out

@@ -16,7 +16,7 @@ ifeq ($(WWW_HOME),http://www.slac.stanford.edu/)
   # Running on SLAC, presumably rhel6-64.
   CXX := mpic++ -pthread
   LD := mpic++ -pthread
-  THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=14
+  THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=7
   MKL_CFLAGS := -I$(MKL_INC)
   MKL_LIBFLAGS := -L$(MKL_LIBDIR)
   MKL_LIBS := -Wl,-Bstatic -Wl,--start-group \
