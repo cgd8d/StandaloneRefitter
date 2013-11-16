@@ -252,8 +252,7 @@ void EventFinisher::ListenForArrivingEvents()
         HasWaited = true;
 #else
         // We have no choice but to do a busy wait.
-        // But try to not make it too busy -- sleep for a moment.
-        boost::this_thread::sleep(boost::posix_time::millisec(1));
+        // This is probably running at SLAC, so we've probably already devoted a thread to io anyway.
         continue;
 #endif
       }
