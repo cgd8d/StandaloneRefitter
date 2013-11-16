@@ -135,6 +135,12 @@ int main(int argc, char** argv)
     std::cout<<"Sequential code."<<std::endl;
 #endif
 
+#ifdef USE_SHARED_MEMORY
+    std::cout<<"Using shared memory."<<std::endl;
+#else
+    std::cout<<"Not using shared memory."<<std::endl;
+#endif
+
     // Put out a continuing non-blocking request for messages from the io process.
     boost::mpi::request req = mpi.comm.irecv(mpi.rank+1, 1);
 
