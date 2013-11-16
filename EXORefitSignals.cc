@@ -1446,6 +1446,8 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
   std::vector<double> R_unprec = event.fR;
   DoLPrecon(R_unprec, event);
   double WorstNorm = 0;
+  bool ret = true;
+  bool is_worst = false;
 
   for(size_t col = 0; col < event.fNumSignals; col++) {
     size_t ColIndex = col*event.fColumnLength;
@@ -1457,18 +1459,22 @@ bool EXORefitSignals::CanTerminate(EventHandler& event)
     for(size_t i = fNoiseColumnLength; i < event.fColumnLength; i++) {
       Norm += R_unprec[ColIndex + i]*R_unprec[ColIndex+i];
     }
-    if(fVerbose) WorstNorm = std::max(Norm, WorstNorm);
-    else if(Norm > fRThreshold*fRThreshold) return false;
+    WorstNorm = std::max(Norm, WorstNorm);
+    if(col == event.fNumSignals-1) is_worst = true;
+    if(Norm > fRThreshold*fRThreshold) {
+      ret = false;
+      break;
+    }
   }
 
   if(fVerbose) {
 #ifdef USE_THREADS
     boost::mutex::scoped_lock sL(CoutMutex);
 #endif
-    std::cout<<"Entry "<<event.fEntryNumber<<" has worst norm = "<<WorstNorm<<std::endl;
-    if(WorstNorm > fRThreshold*fRThreshold) return false;
+    if(is_worst) std::cout<<"Entry "<<event.fEntryNumber<<" has worst norm = "<<WorstNorm<<std::endl;
+    else std::cout<<"Entry "<<event.fEntryNumber<<" has worst norm >= "<<WorstNorm<<std::endl;
   }
-  return true;
+  return ret;
 }
 
 void EXORefitSignals::DoRestart(EventHandler& event)
