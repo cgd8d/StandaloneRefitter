@@ -71,6 +71,7 @@ void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<
     ED->GetScintillationCluster(i)->fEnergy = ED->GetScintillationCluster(i)->fRawEnergy;
     ED->GetScintillationCluster(i)->fRawEnergy = 0;
     ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
+    ED->GetScintillationCluster(i)->fDenoisingInternalCode = event->fStatusCode;
   }
 #ifdef ENABLE_CHARGE
   for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {

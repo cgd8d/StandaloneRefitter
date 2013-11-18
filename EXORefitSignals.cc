@@ -561,9 +561,11 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
   event->fNumIterSinceReset = 0;
   event->fNumSignals = 0;
   event->fChannels = fChannels;
+  event->fStatusCode = -2;
 
   // If we don't have previously-established scintillation times, we can't do anything -- skip.
   if(ED->GetNumScintillationClusters() == 0) {
+    event->fStatusCode = 1;
     FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
@@ -571,6 +573,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
   // If the waveforms aren't full-length, skip for now (although we should be able to handle them later).
   if(ED->fEventHeader.fSampleCount != 2047) {
+    event->fStatusCode = 2;
     FinishProcessedEvent(event);
     BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
     return;
@@ -599,6 +602,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
       FullClusters.push_back(clu);
     }
     if(FullClusters.empty()) {
+      event->fStatusCode = 3;
       FinishProcessedEvent(event);
       BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
       return;
@@ -651,6 +655,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
       if(ExpectedYieldPerGang[i] > 1) HasYield = true;
     }
     if(not HasYield) {
+      event->fStatusCode = 4;
       FinishProcessedEvent(event);
       BeginAcceptEventWatch.Stop(BeginAcceptEventTag);
       return;
@@ -922,7 +927,10 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       SafeStopwatch::tag CanTerminateTag = CanTerminateWatch.Start();
       bool CanTerminateRet = CanTerminate(event);
       CanTerminateWatch.Stop(CanTerminateTag);
-      if(CanTerminateRet) return true;
+      if(CanTerminateRet) {
+        event.fStatusCode = 0;
+        return true;
+      }
     }
 
     // Set up other pieces of the handler.
@@ -1056,13 +1064,17 @@ bool EXORefitSignals::DoBlBiCGSTAB(EventHandler& event)
       SafeStopwatch::tag CanTerminateTag = CanTerminateWatch.Start();
       bool CanTerminateRet = CanTerminate(event);
       CanTerminateWatch.Stop(CanTerminateTag);
-      if(CanTerminateRet) return true;
+      if(CanTerminateRet) {
+        event.fStatusCode = 0;
+        return true;
+      }
     }
 
     // We permit a maximum of 2000 iterations before we give up.
     if(event.fNumIterations >= 2000) {
       event.fX.clear();
       std::cout<<"Giving up on entry "<<event.fEntryNumber<<std::endl;
+      event.fStatusCode = 5;
       return true;
     }
     // If we're doing a restarted solver and it's time, restart.
@@ -1516,6 +1528,7 @@ void EXORefitSignals::PushFinishedEvent(EventHandler* event)
   std::vector<double>().swap(event->fprecon_tmp);
   for(size_t i = 0; i < event->fModels.size(); i++) event->fModels[i]->Strip();
 
+  assert(event->fStatusCode >= 0);
   assert(fSaveToPushEH.bounded_push(event));
 }
 

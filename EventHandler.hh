@@ -22,6 +22,7 @@ struct EventHandler {
   size_t fNumIterSinceReset;
   size_t fNumIterations; // Count the number of times we've tried to terminate.
   std::vector<unsigned char> fChannels;
+  int fStatusCode;
 
 #ifdef ENABLE_CHARGE
   std::vector<ModelManager> fWireModel; // U-wire model information.
@@ -70,6 +71,7 @@ struct EventHandler {
     ar & fColumnLength;
     ar & fNumSignals;
     ar & fChannels;
+    ar & fStatusCode;
 #ifdef USE_CHARGE
     ar & fWireModel;
 #endif
