@@ -80,14 +80,12 @@ void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<
   if(not Results.empty()) {
     // Translate signal magnitudes into corresponding objects.
 #ifdef ENABLE_CHARGE
-    if(not fAPDsOnly) {
-      for(size_t i = 0; i < event->fWireModel.size(); i++) {
-        size_t sigIndex = event->fWireModel[i].fSignalNumber;
-        EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
-        double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
-                                    (CLHEP::keV * ADC_BITS);
-        sig->fDenoisedEnergy = Results[event->fAPDModel.size() + i]*UWireScalingFactor;
-      }
+    for(size_t i = 0; i < event->fWireModel.size(); i++) {
+      size_t sigIndex = event->fWireModel[i].fSignalNumber;
+      EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
+      double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
+                                  (CLHEP::keV * ADC_BITS);
+      sig->fDenoisedEnergy = Results[event->fAPDModel.size() + i]*UWireScalingFactor;
     }
 #endif
     for(size_t i = 0; i < event->fAPDModel.size(); i++) {

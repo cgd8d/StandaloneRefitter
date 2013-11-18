@@ -783,7 +783,7 @@ void EXORefitSignals::AcceptEvent(EXOEventData* ED, Long64_t entryNum)
 
   // Also for convenience, make a vector which maintains the relative ordering of APD and wire models.
   for(size_t i = 0; i < event->fAPDModel.size(); i++) event->fModels.push_back(&event->fAPDModel.at(i));
-#ifdef USE_CHARGE
+#ifdef ENABLE_CHARGE
   for(size_t i = 0; i < event->fWireModel.size(); i++) event->fModels.push_back(&event->fWireModel.at(i));
 #endif
   assert(event->fNumSignals == event->fModels.size());

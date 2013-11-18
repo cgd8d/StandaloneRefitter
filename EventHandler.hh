@@ -72,7 +72,7 @@ struct EventHandler {
     ar & fNumSignals;
     ar & fChannels;
     ar & fStatusCode;
-#ifdef USE_CHARGE
+#ifdef ENABLE_CHARGE
     ar & fWireModel;
 #endif
     ar & fAPDModel;
