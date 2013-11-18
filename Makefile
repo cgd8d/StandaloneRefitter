@@ -14,7 +14,7 @@ ifeq ($(NERSC_HOST),)
   ROOT_LIBS := -lRIO -lHist -lGraf -lTree -lNet -lXMLParser -lGpad -lTreePlayer -lNetx
 ifeq ($(WWW_HOME),http://www.slac.stanford.edu/)
   # Running on SLAC, presumably rhel6-64.
-  CXX := mpic++ -pthread
+  CXX := mpic++ -pthread -DBOOST_MPI_HOMOGENEOUS
   LD := mpic++ -pthread
   THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=7
   MKL_CFLAGS := -I$(MKL_INC)
