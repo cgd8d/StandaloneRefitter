@@ -8,7 +8,6 @@
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
 #include <boost/mpi/communicator.hpp>
-static boost::mpi::communicator gMPIComm;
 
 EventFinisher& EventFinisher::Get(EXOTreeInputModule& inputModule,
                                   std::string RawFileName,
@@ -45,6 +44,7 @@ void EventFinisher::QueueEvent(EventHandler* eventHandler)
   if(not fHasAskedForPause and fEventsToFinish.size() > 5000) {
     sL.unlock();
     if(fVerbose) std::cout<<"Asking the compute process to pause for a bit."<<std::endl;
+    static boost::mpi::communicator gMPIComm;
     gMPIComm.send(gMPIComm.rank() - 1, 1); // Please be merciful, and pause for a bit.
     fHasAskedForPause = true;
   }
@@ -182,13 +182,6 @@ void EventFinisher::Run()
 
     boost::mutex::scoped_lock sL(fEventsToFinishMutex);
 
-    // If we were behind, check if we've caught up.
-    if(fHasAskedForPause and fEventsToFinish.size() < 4000) {
-      if(fVerbose) std::cout<<"Letting the compute process know that it can continue."<<std::endl;
-      gMPIComm.send(gMPIComm.rank() - 1, 0); // OK for compute process to continue.
-      fHasAskedForPause = false;
-    }
-
     // Sleep until we have enough events queued to start.
     static SafeStopwatch watch("Waiting to process more events");
     SafeStopwatch::tag tag = watch.Start();
@@ -215,6 +208,7 @@ void EventFinisher::Run()
 
 void EventFinisher::ListenForArrivingEvents()
 {
+  static boost::mpi::communicator gMPIComm;
   static EventHandler* eh = new EventHandler;
   static boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
 
@@ -240,6 +234,20 @@ void EventFinisher::ListenForArrivingEvents()
     }
     else {
       // We haven't received a message.
+
+      {
+        // If we're not receiving messages, it could be because we requested a pause.
+        // Check to see if we've caught up.
+        // Note: it is important to only interact with MPI from a single thread.
+        // boost::mpi only started supporting multithreaded MPI in version 1.55,
+        // and we'll need to explicitly enable it (with some performance penalty) if we want it.
+        boost::mutex::scoped_lock sL(fEventsToFinishMutex);
+        if(fHasAskedForPause and fEventsToFinish.size() < 4000) {
+          if(fVerbose) std::cout<<"Letting the compute process know that it can continue."<<std::endl;
+          gMPIComm.send(gMPIComm.rank() - 1, 0); // OK for compute process to continue.
+          fHasAskedForPause = false;
+        }
+      }
 
 // If we're running with just one thread, then we only want to wait if
 // there's no IO we could be doing.
