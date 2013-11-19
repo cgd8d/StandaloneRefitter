@@ -9,6 +9,9 @@
 #include "TTree.h"
 #include <string>
 #include <set>
+#ifdef USE_THREADS
+#include <boost/thread/mutex.hpp>
+#endif
 
 class EventFinisher
 {
@@ -33,6 +36,7 @@ class EventFinisher
   TTree* fWaveformTree;
   EXOWaveformData fWFData;
   std::set<EventHandler*, CompareEventHandlerPtrs> fEventsToFinish;
+  boost::mutex fEventsToFinishMutex;
   size_t fDesiredQueueLength;
   bool fProcessingIsDone;
   bool fHasAskedForPause;

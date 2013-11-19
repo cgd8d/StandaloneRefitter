@@ -44,11 +44,13 @@ void EventFinisher::QueueEvent(EventHandler* eventHandler)
 {
   // Take ownership of an event; don't actually finish it yet,
   // but insert it into out set of events to finish.
+  boost::mutex::scoped_lock sL(fEventsToFinishMutex);
   fEventsToFinish.insert(eventHandler);
   if(fVerbose) std::cout<<"Queued an entry; queue length is "<<fEventsToFinish.size()<<std::endl;
 
   // If we've queued too many events, ask the compute process to give us a chance to catch up.
   if(not fHasAskedForPause and fEventsToFinish.size() > 5000) {
+    sL.unlock();
     if(fVerbose) std::cout<<"Asking the compute process to pause for a bit."<<std::endl;
     gMPIComm.send(gMPIComm.rank() - 1, 1); // Please be merciful, and pause for a bit.
     fHasAskedForPause = true;
@@ -173,7 +175,22 @@ void EventFinisher::Run()
 {
   // Call FinishEvent repeatedly until the queue is empty.
   // When the queue is empty, either return or sleep until more events are available.
+
+#ifdef USE_THREADS
+  boost::thread pull_data(&EventFinisher::ListenForArrivingEvents, this);
+#endif
+
   while(true) {
+
+#ifndef USE_THREADS
+    // Always prioritize listening.
+    if(not fProcessingIsDone) ListenForArrivingEvents();
+#endif
+
+    // Sleep until we have enough events queued to start.
+    static SafeStopwatch watch("Waiting to process more events");
+    SafeStopwatch::tag tag = watch.Start();
+    boost::mutex::scoped_lock sL(fEventsToFinishMutex);
 
     // If we were behind, check if we've caught up.
     if(fHasAskedForPause and fEventsToFinish.size() < 4000) {
@@ -182,20 +199,23 @@ void EventFinisher::Run()
       fHasAskedForPause = false;
     }
 
-    // Always prioritize listening.
-    if(not fProcessingIsDone) ListenForArrivingEvents();
+    while(fEventsToFinish.size() < fDesiredQueueLength and not fProcessingIsDone) {
+      sL.unlock();
+      boost::this_thread::sleep_for(boost::chrono::seconds(1));
+      sL.lock();
+    }
+    watch.Stop(tag);
 
-    // When the listener returns, it's because we're ready to process; proceed.
-    std::set<EventHandler*, CompareEventHandlerPtrs>::iterator it = fEventsToFinish.begin();
-    if(it == fEventsToFinish.end()) {
-      // Listener should only return if we can process, or we're done.
+    // As long as we have the lock, might as well check for being totally done.
+    if(fEventsToFinish.empty()) {
       assert(fProcessingIsDone);
       fOutputModule.ShutDown();
       return;
     }
 
-    EventHandler* event = *it;
-    fEventsToFinish.erase(it);
+    EventHandler* event = *fEventsToFinish.begin();
+    fEventsToFinish.erase(fEventsToFinish.begin());
+    sL.unlock();
     FinishEvent(event);
   } // while(true)
 }
@@ -245,22 +265,34 @@ void EventFinisher::ListenForArrivingEvents()
     }
     else {
       // We haven't received a message.
+
+// If we're running with just one thread, then we only want to wait if
+// there's no IO we could be doing.
+// Otherwise, this thread does nothing but listen -- so wait for sure.
+#ifndef USE_THREADS
+      // If we're not using threads, we need to decide whether to return or wait here.
       // If we could be writing events, go back to doing that; else, wait.
       if(fEventsToFinish.size() < fDesiredQueueLength) {
+#endif
+
+// Select the style of waiting.
 #ifdef USE_SHARED_MEMORY
         // We can take advantage of a shared semaphore to do a non-busy wait.
         IOSemaphore.wait(); // MPI's wait is a busy wait; this should be more efficient.
         HasWaited = true;
 #else
-        // We have no choice but to do a busy wait.
-        // This is probably running at SLAC, so we've probably already devoted a thread to io anyway.
-        continue;
+        // We have no choice but to wait.
+        boost::this_thread::yield();
 #endif
+
+// On the other hand, if we're not using threads and we could be doing IO, return.
+#ifndef USE_THREADS
       }
       else {
         // We should go back to io.
         return;
       }
+#endif
     }
   }
 }
