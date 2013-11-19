@@ -5,14 +5,7 @@
 #include "EXOUtilities/EXOFastFourierTransformFFTW.hh"
 
 #include <boost/thread/thread.hpp>
-
-#ifdef USE_SHARED_MEMORY
-#include <boost/interprocess/sync/named_semaphore.hpp>
-#include <boost/interprocess/creation_tags.hpp>
-#include <sstream>
-#else
 #include <boost/date_time/posix_time/posix_time_types.hpp>
-#endif
 
 #include <boost/mpi/communicator.hpp>
 static boost::mpi::communicator gMPIComm;
@@ -225,32 +218,14 @@ void EventFinisher::ListenForArrivingEvents()
   static EventHandler* eh = new EventHandler;
   static boost::mpi::request req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
 
-#ifdef USE_SHARED_MEMORY
-  std::ostringstream SemaphoreName;
-  SemaphoreName << "IOSemaphore_" << gMPIComm.rank()-1;
-  static boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
-                                                          SemaphoreName.str().c_str(),
-                                                          0);
-  bool HasWaited = false; // To help us not double-wait.
-#endif
-
   while (1)
   {
     boost::optional<boost::mpi::status> s_opt = req.test();
     if(s_opt.is_initialized()) {
       // We received a message.
-#ifdef USE_SHARED_MEMORY
-      if(not HasWaited) IOSemaphore.wait(); // Just need to decrement; should be immediate.
-      else HasWaited = false; // We've spent the wait with this receive.
-#endif
       boost::mpi::status& s = s_opt.get();
       if(s.tag()) {
         // This was the signal that we're done listening.
-#ifdef USE_SHARED_MEMORY
-        if(fVerbose) std::cout<<"Removing the named semaphore from the system."<<std::endl;
-        bool success = boost::interprocess::named_semaphore::remove(SemaphoreName.str().c_str());
-        assert(success);
-#endif
         fProcessingIsDone = true;
         delete eh;
         return;
@@ -274,18 +249,11 @@ void EventFinisher::ListenForArrivingEvents()
       // If we could be writing events, go back to doing that; else, wait.
       if(fEventsToFinish.size() < fDesiredQueueLength) {
 #endif
-
-// Select the style of waiting.
+        // Wait.
         static SafeStopwatch watch("Waiting in listener");
         SafeStopwatch::tag tag = watch.Start();
-#ifdef USE_SHARED_MEMORY
-        // We can take advantage of a shared semaphore to do a non-busy wait.
-        IOSemaphore.wait(); // MPI's wait is a busy wait; this should be more efficient.
-        HasWaited = true;
-#else
         // We have no choice but to wait.
         boost::this_thread::yield();
-#endif
         watch.Stop(tag);
 
 // On the other hand, if we're not using threads and we could be doing IO, return.

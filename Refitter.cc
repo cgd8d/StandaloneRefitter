@@ -30,8 +30,6 @@ Should be called like:
 #include <boost/chrono/duration.hpp>
 #endif
 
-#include <boost/interprocess/sync/named_semaphore.hpp>
-#include <boost/interprocess/creation_tags.hpp>
 #include <sstream>
 
 #include <fstream>
@@ -135,12 +133,6 @@ int main(int argc, char** argv)
     std::cout<<"Sequential code."<<std::endl;
 #endif
 
-#ifdef USE_SHARED_MEMORY
-    std::cout<<"Using shared memory."<<std::endl;
-#else
-    std::cout<<"Not using shared memory."<<std::endl;
-#endif
-
     // Put out a continuing non-blocking request for messages from the io process.
     boost::mpi::request req = mpi.comm.irecv(mpi.rank+1, 1);
 
@@ -177,14 +169,6 @@ int main(int argc, char** argv)
     static SafeStopwatch WaitForFinisherWatch("Waiting for events to be finished at the end (sequential)");
     SafeStopwatch::tag WaitForFinisherTag = WaitForFinisherWatch.Start();
     // Send a message with a non-zero tag -- the payload is unimportant.
-#ifdef USE_SHARED_MEMORY
-    std::ostringstream SemaphoreName;
-    SemaphoreName << "IOSemaphore_" << mpi.rank;
-    boost::interprocess::named_semaphore IOSemaphore(boost::interprocess::open_or_create,
-                                                     SemaphoreName.str().c_str(),
-                                                     0);
-    IOSemaphore.post();
-#endif
     mpi.comm.send(mpi.rank+1, 1, EventHandler());
     WaitForFinisherWatch.Stop(WaitForFinisherTag);
   }
