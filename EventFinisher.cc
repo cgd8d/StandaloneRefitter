@@ -187,9 +187,6 @@ void EventFinisher::Run()
     if(not fProcessingIsDone) ListenForArrivingEvents();
 #endif
 
-    // Sleep until we have enough events queued to start.
-    static SafeStopwatch watch("Waiting to process more events");
-    SafeStopwatch::tag tag = watch.Start();
     boost::mutex::scoped_lock sL(fEventsToFinishMutex);
 
     // If we were behind, check if we've caught up.
@@ -199,6 +196,9 @@ void EventFinisher::Run()
       fHasAskedForPause = false;
     }
 
+    // Sleep until we have enough events queued to start.
+    static SafeStopwatch watch("Waiting to process more events");
+    SafeStopwatch::tag tag = watch.Start();
     while(fEventsToFinish.size() < fDesiredQueueLength and not fProcessingIsDone) {
       sL.unlock();
       boost::this_thread::sleep_for(boost::chrono::seconds(1));
@@ -276,6 +276,8 @@ void EventFinisher::ListenForArrivingEvents()
 #endif
 
 // Select the style of waiting.
+        static SafeStopwatch watch("Waiting in listener");
+        SafeStopwatch::tag tag = watch.Start();
 #ifdef USE_SHARED_MEMORY
         // We can take advantage of a shared semaphore to do a non-busy wait.
         IOSemaphore.wait(); // MPI's wait is a busy wait; this should be more efficient.
@@ -284,6 +286,7 @@ void EventFinisher::ListenForArrivingEvents()
         // We have no choice but to wait.
         boost::this_thread::yield();
 #endif
+        watch.Stop(tag);
 
 // On the other hand, if we're not using threads and we could be doing IO, return.
 #ifndef USE_THREADS
