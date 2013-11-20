@@ -27,7 +27,7 @@ else
   CXX := g++ -pthread
   THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=4
   MKL_CFLAGS := -mkl=sequential
-  MKL_LIBFLAGS := -mkl=sequential
+  MKL_LIBFLAGS := -mkl=sequential -static-intel -no-intel-extensions
   MKL_LIBS :=
 endif
 else
@@ -51,7 +51,7 @@ else
   ifeq ($(NERSC_HOST),hopper)
      THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=6
      MKL_CFLAGS := -mkl=sequential
-     MKL_LIBFLAGS := -mkl=sequential
+     MKL_LIBFLAGS := -mkl=sequential -static-intel -no-intel-extensions
   else ifeq ($(NERSC_HOST),edison)
      THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=12
      MKL_CFLAGS := -I$(MKL_INC)
