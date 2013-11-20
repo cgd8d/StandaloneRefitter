@@ -39,9 +39,9 @@ else
                -lNetx -lXrdClient -lXrdUtils -lCore -lMathCore -lMatrix -lThread \
                -lCint -lGraf3d -lPhysics -lMinuit -lm -ldl -Wl,-Bstatic
   XROOTD_LIBFLAGS := -L/global/project/projectdirs/exo200/software/lib/xrootd/3.3.4/lib
-  MKL_LIBS := -Wl,-Bstatic -Wl,--start-group \
-              -lmkl_intel_lp64 -lmkl_sequential -lmkl_core \
-              -Wl,--end-group -Wl,-Bdynamic
+  MKL_CFLAGS := -mkl=sequential
+  MKL_LIBFLAGS :=
+  MKL_LIBS := -mkl=sequential -static-intel -no-intel-extensions
   ifeq ($(BUILD_STATIC),yes)
      LD := ./.wrapexecuteCC -dynamic
      EXTRA_LD_DEPS := .wrapexecuteCC
@@ -50,12 +50,8 @@ else
   endif
   ifeq ($(NERSC_HOST),hopper)
      THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=6
-     MKL_CFLAGS := -mkl=sequential
-     MKL_LIBFLAGS := -mkl=sequential -static-intel -no-intel-extensions
   else ifeq ($(NERSC_HOST),edison)
      THREAD_MACROS := -DUSE_THREADS -DNUM_THREADS=12
-     MKL_CFLAGS := -I$(MKL_INC)
-     MKL_LIBFLAGS := -L$(MKL_LIBDIR)
   else
      exit 1
   endif
