@@ -1433,14 +1433,16 @@ void EXORefitSignals::DoPassThroughEvents()
   fSaveToPushEH.consume_all(boost::bind(&EXORefitSignals::FinishProcessedEvent, this, _1));
 
   // Clear out any completed send requests.
-  std::list<std::pair<boost::mpi::request, EventHandler*> >::iterator it = fPendingSends.begin();
-  while(it != fPendingSends.end()) {
-    if(it->first.test().is_initialized()) {
-      delete it->second;
-      it = fPendingSends.erase(it);
+  do {
+    std::list<std::pair<boost::mpi::request, EventHandler*> >::iterator it = fPendingSends.begin();
+    while(it != fPendingSends.end()) {
+      if(it->first.test().is_initialized()) {
+        delete it->second;
+        it = fPendingSends.erase(it);
+      }
+      else it++;
     }
-    else it++;
-  }
+  } while(fPendingSends.size() > 1000); // Ensure we don't let fPendingSends grow out of control.
 
   DoPassWatch.Stop(DoPassTag);
 }
