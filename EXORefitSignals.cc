@@ -72,6 +72,7 @@ EXORefitSignals::EXORefitSignals()
   fVerbose(false),
   fDoRestarts(100),
   fNumMulsToAccumulate(500),
+  fGainCorrectionFactor(1),
   fLightmapFilename("data/lightmap/LightMaps.root"),
   fRThreshold(0.1),
   fSaveToPushEH(0),
@@ -502,6 +503,8 @@ double EXORefitSignals::GetGain(unsigned char channel, EventHandler& event) cons
   Gain *= 32.e-9; // Convert from electrons to volts in the preamp. Roughly 1/(5 pF) gain.
   Gain *= 12.10; // Gain from shapers (amplification factor, and gain from transfer function.
   Gain *= 4096./2.5; // Conversion from volts to ADC counts -- full-scale is 2.5 volts.
+
+  Gain *= fGainCorrectionFactor; // Permits turning the knob of poisson-vs-electronic noise.
 
   return Gain;
 }
