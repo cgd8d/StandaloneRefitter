@@ -119,8 +119,7 @@ clean:
 
 .wrapexecuteCC : .wraplinuxCC .wrapCC
 	@cp `which CC` $@
-	@$(eval $@_temp := $(shell ./.wrapCC -c temp.C | awk '{ print $$1 }'))
-	@sed -i 's/$($@_temp)/\.\/$</g' $@
+	@sed -i 's/\ [a-zA-Z$$\/{}_]*$${compilerdriver}/ \.\/$</g' $@
 
 
 ifneq ($(MAKECMDGOALS),clean)
