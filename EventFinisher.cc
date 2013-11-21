@@ -168,15 +168,21 @@ void EventFinisher::Run()
   // When the queue is empty, either return or sleep until more events are available.
 
 #ifdef USE_THREADS
-  boost::thread pull_data(&EventFinisher::ListenForArrivingEvents, this);
-#endif
-
-  while(true) {
-
-#ifndef USE_THREADS
-    // Always prioritize listening.
+  boost::thread finish_data(&EventFinisher::FinishReceivedEvents, this);
+  ListenForArrivingEvents(); // This needs to be the in the main thread, for MPI to be "funneled".
+  finish_data.join();
+#else
+  while(not (fProcessingIsDone and fEventsToFinish.empty())) {
     if(not fProcessingIsDone) ListenForArrivingEvents();
+    FinishReceivedEvents();
+  }
 #endif
+}
+
+void EventFinisher::FinishReceivedEvents()
+{
+#ifdef USE_THREADS
+  while(true) {
 
     boost::mutex::scoped_lock sL(fEventsToFinishMutex);
 
@@ -196,12 +202,18 @@ void EventFinisher::Run()
       fOutputModule.ShutDown();
       return;
     }
+#endif
 
+    assert(not fEventsToFinish.empty()); // If threaded, we slept; if not, listener guarantees this.
     EventHandler* event = *fEventsToFinish.begin();
     fEventsToFinish.erase(fEventsToFinish.begin());
+#ifdef USE_THREADS
     sL.unlock();
+#endif
     FinishEvent(event);
+#ifdef USE_THREADS
   } // while(true)
+#endif
 }
 
 void EventFinisher::ListenForArrivingEvents()

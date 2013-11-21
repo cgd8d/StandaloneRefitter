@@ -28,6 +28,7 @@ class EventFinisher
   bool fVerbose;
  private:
   void FinishEvent(EventHandler* event);
+  void FinishReceivedEvents();
 
   EventFinisher(EXOTreeInputModule& inputModule, std::string RawFileName, std::string OutFileName);
   EXOTreeInputModule& fInputModule;
