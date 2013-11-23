@@ -117,6 +117,9 @@ void EventFinisher::FinishEvent(EventHandler* event)
     Long64_t RawEntryNum = fWaveformTree->GetEntryNumberWithIndex(event->fRunNumber, event->fEventNumber);
     fWaveformTree->GetBranch("fWaveformData")->GetEntry(RawEntryNum);
     GetRawWatch.Stop(GetRawTag);
+
+    static SafeStopwatch RestOfRawWatch("FinishEvent::RestOfRaw");
+    SafeStopwatch::tag RestOfRawTag = RestOfRawWatch.Start();
     fWFData.Decompress();
 
     // Collect the fourier-transformed waveforms.  Save them split into real and complex parts.
@@ -157,9 +160,13 @@ void EventFinisher::FinishEvent(EventHandler* event)
         }
       }
     }
+    RestOfRawWatch.Stop(RestOfRawTag);
   } // End setting of denoised energy signals.
 
+  static SafeStopwatch FinishProcessedWatch("FinishProcessedWatch");
+  SafeStopwatch::tag FinishProcessedTag = FinishProcessedWatch.Start();
   FinishProcessedEvent(event, Results); // Deletes event.
+  FinishProcessedWatch.Stop(FinishProcessedTag);
 }
 
 void EventFinisher::Run()
@@ -224,7 +231,10 @@ void EventFinisher::ListenForArrivingEvents()
 
   while (1)
   {
+    static SafeStopwatch MPITestWatch("MPI_Test");
+    SafeStopwatch::tag MPITestTag = MPITestWatch.Start();
     boost::optional<boost::mpi::status> s_opt = req.test();
+    MPITestWatch.Stop(MPITestTag);
     if(s_opt.is_initialized()) {
       // We received a message.
       boost::mpi::status& s = s_opt.get();
@@ -236,9 +246,12 @@ void EventFinisher::ListenForArrivingEvents()
       }
       else {
         // Receive an event, then get ready for the next one.
+        static SafeStopwatch watch("QueueEvent in listener");
+        SafeStopwatch::tag tag = watch.Start();
         QueueEvent(eh);
         eh = new EventHandler;
         req = gMPIComm.irecv( gMPIComm.rank() - 1, boost::mpi::any_tag, *eh );
+        watch.Stop(tag);
         continue;
       }
     }
@@ -251,12 +264,15 @@ void EventFinisher::ListenForArrivingEvents()
         // Note: it is important to only interact with MPI from a single thread.
         // boost::mpi only started supporting multithreaded MPI in version 1.55,
         // and we'll need to explicitly enable it (with some performance penalty) if we want it.
+        static SafeStopwatch watch("Getting lock in listener");
+        SafeStopwatch::tag tag = watch.Start();
         boost::mutex::scoped_lock sL(fEventsToFinishMutex);
         if(fHasAskedForPause and fEventsToFinish.size() < 4000) {
           if(fVerbose) std::cout<<"Letting the compute process know that it can continue."<<std::endl;
           gMPIComm.send(gMPIComm.rank() - 1, 0); // OK for compute process to continue.
           fHasAskedForPause = false;
         }
+        watch.Stop(tag);
       }
 
 // If we're running with just one thread, then we only want to wait if
