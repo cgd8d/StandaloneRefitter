@@ -83,6 +83,7 @@ int main(int argc, char** argv)
   Long64_t StartEntry = 0;
   Long64_t NumEntries = 100;
   double Threshold = 10;
+  double GainCorrectionFactor = 1;
 
   std::ifstream OptionFile((std::string(argv[1]) + "/infile" + mpi.RankString).c_str());
   OptionFile >> ProcessedFileName
@@ -91,7 +92,8 @@ int main(int argc, char** argv)
              >> NoiseFileName
              >> StartEntry
              >> NumEntries
-             >> Threshold;
+             >> Threshold
+             >> GainCorrectionFactor;
   // On NERSC, we always use xrootd.  Need the IP address of the MOM node.
   assert(argc == 3);
   std::string mom_ip = argv[2]; // Should also include port number used.
@@ -104,6 +106,7 @@ int main(int argc, char** argv)
   std::cout<<"Noise file: "<<NoiseFileName<<std::endl;
   std::cout<<"Starting at entry "<<StartEntry<<std::endl;
   std::cout<<"Handle "<<NumEntries<<" entries."<<std::endl;
+  std::cout<<"Gain correction factor: "<<GainCorrectionFactor<<std::endl;
 
   EXOTreeInputModule InputModule;
   std::cout<<"About to set filename."<<std::endl;
@@ -125,6 +128,7 @@ int main(int argc, char** argv)
     RefitSig.SetNoiseFilename(NoiseFileName);
     RefitSig.SetRThreshold(Threshold);
     RefitSig.fVerbose = true;
+    RefitSig.fGainCorrectionFactor = GainCorrectionFactor;
     RefitSig.Initialize();
 
 #ifdef USE_THREADS
