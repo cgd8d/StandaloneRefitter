@@ -47,8 +47,10 @@ bool IsEventAcceptable(const EXOEventData* event)
   // Ignore v-wire signals.
   if(event->GetNumAPDSignals() or event->GetNumUWireSignals()) return false;
 
-  // Skip events which are vetoed by any sort of coincidence.
-  if(coinc.IsVetoed(*event)) return false;
+  // Skip events occurring during a bad-environment time.
+  // This should be sufficient for both noise and LB runs;
+  // if we cut events at the beginning and end of the run, that kills a lot of noise-run statistics.
+  if(coinc.IsVetoed_BadEnvironment(*event)) return false;
 
   // OK :)
   return true;
