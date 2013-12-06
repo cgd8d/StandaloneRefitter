@@ -11,6 +11,7 @@ from __future__ import with_statement
 import os
 import glob
 import ROOT
+ROOT.gROOT.SetBatch()
 ROOT.gSystem.Load("libEXOUtilities")
 
 ProcsPerJob = [2, 6] + [20]*1000 # Start with a couple of small jobs, followed by bigger ones.
@@ -70,8 +71,6 @@ for runInfo in ProcDataset:
         ProcList += ProcsToInsert
         OutRunList.append(os.path.join(DenoisedOutDir, str(runInfo.GetRunNumber())))
         print "Added jobs for run %i." % runInfo.GetRunNumber()
-    except ValueError, exc:
-        print "Failed to add jobs for run %i: %s." % (runInfo.GetRunNumber(), exc.message)
 
 # Try to group processes of similar length together, so they finish in similar times.
 # Also make the shortest jobs go into the smallest group, since this should also reduce waste.
