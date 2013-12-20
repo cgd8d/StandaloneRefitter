@@ -19,7 +19,7 @@ class EventFinisher
   static EventFinisher& Get(EXOTreeInputModule& inputModule, std::string RawFileName, std::string OutFileName);
 
   void QueueEvent(EventHandler* eventHandler);
-  void FinishProcessedEvent(EventHandler* event, const std::vector<double>& Results = std::vector<double>());
+  void FinishProcessedEvent(EventHandler* event);
 
   void Run();
 

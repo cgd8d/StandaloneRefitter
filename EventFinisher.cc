@@ -50,7 +50,7 @@ void EventFinisher::QueueEvent(EventHandler* eventHandler)
   }
 }
 
-void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<double>& Results)
+void EventFinisher::FinishProcessedEvent(EventHandler* event)
 {
   // Grab the processed event from input; apply denoised results as necessary; and write to output.
   // We will also delete event here.
@@ -77,7 +77,7 @@ void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<
   }
 #endif
 
-  if(not Results.empty()) {
+  if(not event->fResults.empty()) {
     // Translate signal magnitudes into corresponding objects.
 #ifdef ENABLE_CHARGE
     for(size_t i = 0; i < event->fWireModel.size(); i++) {
@@ -85,12 +85,12 @@ void EventFinisher::FinishProcessedEvent(EventHandler* event, const std::vector<
       EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
       double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
                                   (CLHEP::keV * ADC_BITS);
-      sig->fDenoisedEnergy = Results[event->fAPDModel.size() + i]*UWireScalingFactor;
+      sig->fDenoisedEnergy = event->fResults[event->fAPDModel.size() + i]*UWireScalingFactor;
     }
 #endif
     for(size_t i = 0; i < event->fAPDModel.size(); i++) {
       size_t sigIndex = event->fAPDModel[i].fSignalNumber;
-      ED->GetScintillationCluster(sigIndex)->fDenoisedEnergy = Results[i]*THORIUM_ENERGY_KEV;
+      ED->GetScintillationCluster(sigIndex)->fDenoisedEnergy = event->fResults[i]*THORIUM_ENERGY_KEV;
       ED->GetScintillationCluster(sigIndex)->fRawEnergy = ED->GetScintillationCluster(sigIndex)->fDenoisedEnergy;
     }
   }
@@ -106,10 +106,9 @@ void EventFinisher::FinishEvent(EventHandler* event)
   // Then pass the filled event to the output module.
   if(fVerbose) std::cout<<"Finishing entry "<<event->fEntryNumber<<std::endl;
 
-  std::vector<double> Results;
   if(not event->fX.empty()) {
     if(fVerbose) std::cout<<"\tThis entry has denoised results to compute."<<std::endl;
-    Results.assign(event->fNumSignals, 0);
+    event->fResults.assign(event->fNumSignals, 0);
 
     // We need to compute denoised signals.
     static SafeStopwatch GetRawWatch("FinishEvent::GetRawEntry (threaded, mostly)");
@@ -147,16 +146,16 @@ void EventFinisher::FinishEvent(EventHandler* event)
     }
 
     // Produce estimates of the signals.
-    for(size_t i = 0; i < Results.size(); i++) {
+    for(size_t i = 0; i < event->fResults.size(); i++) {
       for(size_t f = 0; f <= MAX_F - MIN_F; f++) {
         for(size_t chan_index = 0; chan_index < event->fChannels.size(); chan_index++) {
           size_t XIndex = event->fColumnLength*i + 2*event->fChannels.size()*f + chan_index;
-          Results[i] += event->fX[XIndex]*WF_real[chan_index][f + MIN_F];
+          event->fResults[i] += event->fX[XIndex]*WF_real[chan_index][f + MIN_F];
         }
         if(f == MAX_F - MIN_F) continue;
         for(size_t chan_index = 0; chan_index < event->fChannels.size(); chan_index++) {
           size_t XIndex = event->fColumnLength*i + 2*event->fChannels.size()*f + event->fChannels.size() + chan_index;
-          Results[i] += event->fX[XIndex]*WF_imag[chan_index][f + MIN_F];
+          event->fResults[i] += event->fX[XIndex]*WF_imag[chan_index][f + MIN_F];
         }
       }
     }
@@ -165,7 +164,7 @@ void EventFinisher::FinishEvent(EventHandler* event)
 
   static SafeStopwatch FinishProcessedWatch("FinishProcessedWatch");
   SafeStopwatch::tag FinishProcessedTag = FinishProcessedWatch.Start();
-  FinishProcessedEvent(event, Results); // Deletes event.
+  FinishProcessedEvent(event); // Deletes event.
   FinishProcessedWatch.Stop(FinishProcessedTag);
 }
 
