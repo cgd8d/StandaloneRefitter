@@ -8,6 +8,7 @@
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 
 #include <boost/mpi/communicator.hpp>
+#include <memory>
 
 EventFinisher& EventFinisher::Get(EXOTreeInputModule& inputModule,
                                   std::string RawFileName,
@@ -19,17 +20,14 @@ EventFinisher& EventFinisher::Get(EXOTreeInputModule& inputModule,
 
 EventFinisher::EventFinisher(EXOTreeInputModule& inputModule, std::string RawFileName, std::string OutFileName)
 : fVerbose(true),
-  fInputModule(inputModule),
   fWaveformFile(RawFileName.c_str()),
   fDesiredQueueLength(2000),
   fProcessingIsDone(false),
-  fHasAskedForPause(false)
+  fHasAskedForPause(false),
+  fWriter(inputModule, OutFileName)
 {
   fWaveformTree = dynamic_cast<TTree*>(fWaveformFile.Get("tree"));
   fWaveformTree->GetBranch("fWaveformData")->SetAddress(&fWFData);
-  fOutputModule.SetOutputFilename(OutFileName);
-  fOutputModule.Initialize();
-  fOutputModule.BeginOfRun(NULL);
 }
 
 void EventFinisher::QueueEvent(EventHandler* eventHandler)
@@ -48,56 +46,6 @@ void EventFinisher::QueueEvent(EventHandler* eventHandler)
     gMPIComm.send(gMPIComm.rank() - 1, 1); // Please be merciful, and pause for a bit.
     fHasAskedForPause = true;
   }
-}
-
-void EventFinisher::FinishProcessedEvent(EventHandler* event)
-{
-  // Grab the processed event from input; apply denoised results as necessary; and write to output.
-  // We will also delete event here.
-  // This function is particularly useful when called directly for events with no denoising to do;
-  // in that case, it allows us to complete handling of an event without unnecessary lock management.
-  if(fVerbose) std::cout<<"\tFinishProcessedEvent for entry "<<event->fEntryNumber<<std::endl;
-
-  // If this function is called by AcceptEvent, trees are fast at re-returning an already-gotten entry.
-  EXOEventData* ED = fInputModule.GetEvent(event->fEntryNumber);
-
-  // We need to clear out the denoised information here, since we just freshly read the event from file.
-  for(size_t i = 0; i < ED->GetNumScintillationClusters(); i++) {
-    ED->GetScintillationCluster(i)->fEnergy = ED->GetScintillationCluster(i)->fRawEnergy;
-    ED->GetScintillationCluster(i)->fRawEnergy = 0;
-    ED->GetScintillationCluster(i)->fDenoisedEnergy = 0;
-    ED->GetScintillationCluster(i)->fDenoisingInternalCode = event->fStatusCode;
-  }
-#ifdef ENABLE_CHARGE
-  for(size_t i = 0; i < ED->GetNumUWireSignals(); i++) {
-    ED->GetUWireSignal(i)->fDenoisedEnergy = 0;
-  }
-  for(size_t i = 0; i < ED->GetNumChargeClusters(); i++) {
-    ED->GetChargeCluster(i)->fDenoisedEnergy = 0;
-  }
-#endif
-
-  if(not event->fResults.empty()) {
-    // Translate signal magnitudes into corresponding objects.
-#ifdef ENABLE_CHARGE
-    for(size_t i = 0; i < event->fWireModel.size(); i++) {
-      size_t sigIndex = event->fWireModel[i].fSignalNumber;
-      EXOUWireSignal* sig = ED->GetUWireSignal(sigIndex);
-      double UWireScalingFactor = ADC_FULL_SCALE_ELECTRONS_WIRE * W_VALUE_LXE_EV_PER_ELECTRON /
-                                  (CLHEP::keV * ADC_BITS);
-      sig->fDenoisedEnergy = event->fResults[event->fAPDModel.size() + i]*UWireScalingFactor;
-    }
-#endif
-    for(size_t i = 0; i < event->fAPDModel.size(); i++) {
-      size_t sigIndex = event->fAPDModel[i].fSignalNumber;
-      ED->GetScintillationCluster(sigIndex)->fDenoisedEnergy = event->fResults[i]*THORIUM_ENERGY_KEV;
-      ED->GetScintillationCluster(sigIndex)->fRawEnergy = ED->GetScintillationCluster(sigIndex)->fDenoisedEnergy;
-    }
-  }
-
-  fOutputModule.ProcessEvent(ED);
-  if(fVerbose) std::cout<<"\tDone with entry "<<event->fEntryNumber<<std::endl;
-  delete event;
 }
 
 void EventFinisher::FinishEvent(EventHandler* event)
@@ -160,11 +108,12 @@ void EventFinisher::FinishEvent(EventHandler* event)
       }
     }
     RestOfRawWatch.Stop(RestOfRawTag);
+    std::vector<double>().swap(event->fX); // Done with fX, so force-clear it.
   } // End setting of denoised energy signals.
 
   static SafeStopwatch FinishProcessedWatch("FinishProcessedWatch");
   SafeStopwatch::tag FinishProcessedTag = FinishProcessedWatch.Start();
-  FinishProcessedEvent(event); // Deletes event.
+  fWriter.AcceptEvent(std::shared_ptr<EventHandler>(event));
   FinishProcessedWatch.Stop(FinishProcessedTag);
 }
 
@@ -205,7 +154,7 @@ void EventFinisher::FinishReceivedEvents()
     // As long as we have the lock, might as well check for being totally done.
     if(fEventsToFinish.empty()) {
       assert(fProcessingIsDone);
-      fOutputModule.ShutDown();
+      fWriter.Finish();
       return;
     }
 #endif

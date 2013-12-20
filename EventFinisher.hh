@@ -2,8 +2,7 @@
 #define EventFinisher_hh
 
 #include "EventHandler.hh"
-#include "EXOAnalysisManager/EXOTreeInputModule.hh"
-#include "EXOAnalysisManager/EXOTreeOutputModule.hh"
+#include "EventWriter.hh"
 #include "EXOUtilities/EXOWaveformData.hh"
 #include "TXNetFile.h"
 #include "TTree.h"
@@ -19,7 +18,6 @@ class EventFinisher
   static EventFinisher& Get(EXOTreeInputModule& inputModule, std::string RawFileName, std::string OutFileName);
 
   void QueueEvent(EventHandler* eventHandler);
-  void FinishProcessedEvent(EventHandler* event);
 
   void Run();
 
@@ -31,8 +29,6 @@ class EventFinisher
   void FinishReceivedEvents();
 
   EventFinisher(EXOTreeInputModule& inputModule, std::string RawFileName, std::string OutFileName);
-  EXOTreeInputModule& fInputModule;
-  EXOTreeOutputModule fOutputModule;
   TXNetFile fWaveformFile;
   TTree* fWaveformTree;
   EXOWaveformData fWFData;
@@ -41,5 +37,6 @@ class EventFinisher
   size_t fDesiredQueueLength;
   bool fProcessingIsDone;
   bool fHasAskedForPause;
+  EventWriter fWriter;
 };
 #endif
