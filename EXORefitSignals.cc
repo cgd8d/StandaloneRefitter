@@ -500,8 +500,12 @@ double EXORefitSignals::GetGain(unsigned char channel, EventHandler& event) cons
   // Time-dependence from the gainmap.
   Gain *= event.fAPDGainMapEval.at(channel)/fGainMapAtT0.at(channel);
 
+  // According to Liang, the overall electronics gain of the APDs is about 900 electrons / ADC.
+  // Below I break down the three contributors to that overall number.
+  // These are all very rough numbers.  Probably the biggest uncertainty comes from the preamps.
+  // We could measure more precise channel-by-channel values using an external APD calibration.
   Gain *= 32.e-9; // Convert from electrons to volts in the preamp. Roughly 1/(5 pF) gain.
-  Gain *= 12.10; // Gain from shapers (amplification factor, and gain from transfer function.
+  Gain *= 21.2; // Gain from shapers (amplification factor, and gain from transfer function).
   Gain *= 4096./2.5; // Conversion from volts to ADC counts -- full-scale is 2.5 volts.
 
   Gain *= fGainCorrectionFactor; // Permits turning the knob of poisson-vs-electronic noise.
