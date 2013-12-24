@@ -432,7 +432,7 @@ double EXORefitSignals::GetGain(unsigned char channel, EventHandler& event) cons
     case 160: Gain *= 137.602725389; break;
     case 161: Gain *= 197.78183714; break;
     case 162: Gain *= 155.478773762; break;
-    // case 163: Gain *= 0; // Bad channel, omitted.
+    case 163: Gain *= 200; break; // FICTITIOUS, but this channel was disconnected Feb 2012.  Better guess?
     case 164: Gain *= 175.875067527; break;
     case 165: Gain *= 160.014408865; break;
     case 166: Gain *= 183.408055613; break;
@@ -498,7 +498,9 @@ double EXORefitSignals::GetGain(unsigned char channel, EventHandler& event) cons
     default: Gain *= 0; // Bad or non-existent channel.
   }
   // Time-dependence from the gainmap.
-  Gain *= event.fAPDGainMapEval.at(channel)/fGainMapAtT0.at(channel);
+  if(channel != 163) { // Because we don't have a good T0 for channel 163 yet.
+    Gain *= event.fAPDGainMapEval.at(channel)/fGainMapAtT0.at(channel);
+  }
 
   // According to Liang, the overall electronics gain of the APDs is about 900 electrons / ADC.
   // Below I break down the three contributors to that overall number.
