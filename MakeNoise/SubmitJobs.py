@@ -1,7 +1,7 @@
 #!/usr/local/bin/python
 
-EntriesPerRun = 10
-Queue = 'medium'
+EntriesPerRun = -1
+Queue = 'xxl'
 
 # Inclusive run ranges.
 # This set of windows is meant to only include Run2ab for now.
@@ -34,5 +34,5 @@ for runWindow in RunWindows:
 # We also generate a noise window for runs 2401-2423 (09-28-11 APD biases).
 # But, lacking physics data, we use a noise run there.
 subprocess.call(['bsub', '-q', Queue, '-R', 'rhel50', '-o', '2401_to_2423.log',
-                 './MakeNoiseFile', '2401_to_2423.dat', '10000', '2401'])
+                 './MakeNoiseFile', '2401_to_2423.dat', '-1', '2401'])
 

@@ -27,9 +27,7 @@ Be sure to compile with optimization enabled!  It makes a big difference.
 #include <iostream>
 #include <fstream>
 
-EXOCoincidences coinc;
-
-bool IsEventAcceptable(const EXOEventData* event)
+bool IsEventAcceptable(const EXOEventData* event, const EXOCoincidences& coinc)
 {
   // Check that this event is an acceptable example of pure electronic noise.
   const EXOEventHeader& header = event->fEventHeader;
@@ -126,7 +124,7 @@ int main(int argc, char** argv)
   size_t NumEntriesAccepted = 0;
 
   for(size_t runIndex = 0; runIndex < Runs.size(); runIndex++) {
-    std::cout<<"Starting on run "<<Runs[runIndex]<<std::endl;
+    std::cout<<"Starting on run "<<Runs[runIndex]<<" ("<<runIndex<<"/"<<Runs.size()<<")"<<std::endl;
 
     const EXORunInfo::RunList& rawRunList =
       EXORunInfoManager::GetRunInfo(Runs[runIndex], "Data/Raw/root").GetRunFiles();
@@ -152,15 +150,17 @@ int main(int argc, char** argv)
     procChain.SetBranchAddress("EventBranch", &ProcEvent);
     assert(rawChain.BuildIndex("fRunNumber", "fEventNumber") >= 0);
 
+    EXOCoincidences coinc;
     coinc.Load(procChain); // Clears any previously-loaded chain.
 
     int NumAcceptedFromThisRun = 0;
     Long64_t EntryNum = 0;
-    while(NumAcceptedFromThisRun < EntriesPerRun and EntryNum < procChain.GetEntries()) {
+    while((NumAcceptedFromThisRun < EntriesPerRun or EntriesPerRun == -1) and
+          EntryNum < procChain.GetEntries()) {
+      if(EntryNum % 1000 == 0) std::cout<<"\tTrying entry "<<EntryNum<<std::endl;
       procChain.GetEntry(EntryNum);
       EntryNum++;
-      if(not IsEventAcceptable(ProcEvent)) continue;
-      std::cout<<"\tAccepted event "<<ProcEvent->fEventNumber<<std::endl;
+      if(not IsEventAcceptable(ProcEvent, coinc)) continue;
 
       // Get the raw entry by index, since entry numbers won't generally match (due to masking).
       assert(rawChain.GetEntryWithIndex(ProcEvent->fRunNumber, ProcEvent->fEventNumber));
@@ -276,6 +276,7 @@ int main(int argc, char** argv)
   std::cout<<"Done filling RI entries."<<std::endl;
 
   // Write out to file.
+  std::cout<<"Writing to file."<<std::endl;
   std::filebuf outfile;
   outfile.open(argv[1],
                std::ios_base::out | std::ios_base::binary | std::ios_base::trunc);
