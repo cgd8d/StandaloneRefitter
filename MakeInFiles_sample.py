@@ -14,12 +14,12 @@ import ROOT
 ROOT.gROOT.SetBatch()
 ROOT.gSystem.Load("libEXOUtilities")
 
-ProcsPerJob = [2, 6] + [20]*1000 # Start with a couple of small jobs, followed by bigger ones.
 DenoisedOutDir = "/scratch1/scratchdirs/claytond/LightOnly"
+ProcsPerJob = [40]*1000 # 40 simultaneous jobs is about all that we can safely handle.
 
 NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles"
-RunWindows = [(2464, 2699), (2700, 2852), (2853, 2891), (2892, 3117), (3118, 3329), (3330, 3699),
-              (3700, 3949), (3950, 4149), (4150, 4579), (4580, 4779), (4780, 5197), (5198, 5367)]
+RunWindows = [(2401, 2423), (2424, 2699), (2700, 2852), (2853, 2891), (2892, 3117), (3118, 3326), (3327, 3700),
+              (3701, 3949), (3950, 4140), (4141, 4579), (4580, 4779), (4780, 5197), (5198, 5892)]
 def GetNoiseFile(runNo):
     noiseFile = ""
     for noiseWindow in RunWindows:
@@ -28,6 +28,7 @@ def GetNoiseFile(runNo):
     # Currently I refuse to pick a noise file by any heuristic here.
     raise ValueError("No noise file for run %i." % runNo)
 
+# RunTypes are "Data-Source calibration", "Data-Physics", etc.
 ProcDataset = ROOT.EXORunInfoManager.GetDataSet("Data/Processed/masked",
                                                 "run>=2464&&run<=5367&&runType==\"Data-Source calibration\"")
 
@@ -49,12 +50,12 @@ def JobForProc(procFile, runNo):
     FileParts[-3] = 'root'
     FileParts[-1] = 'run' + FileBase
     xrootd_rawfile = '/' + '/'.join(FileParts)
-    return ("%s\n%s\n%s\n%s\n%i\n%i\n%f\n" %
+    return ("%s\n%s\n%s\n%s\n%i\n%i\n%f\n%f\n" %
             (xrootd_procfile, # Processed file
              xrootd_rawfile, # Raw file
              "%s/%i/denoised%s" % (DenoisedOutDir, runNo, FileBase), # Out file
              GetNoiseFile(runNo), # noise file
-             0, -1, 0.1)) # Run parameters
+             0, -1, 0.1, 1.6)) # Run parameters
 
 OutRunList = []
 ProcList = []
