@@ -19,7 +19,8 @@ RunWindows = [(2424, 2699),
               (4141, 4579),
               (4580, 4779),
               (4780, 5197), # LC filters removed from FECs
-              (5198, 5892)] # Run2c ends.
+              (5198, 5590), # Toward end of 5590 CR temps are elevated; there was a lasting effect
+              (5591, 5892)] # Run2c ends.
 
 import subprocess
 import ROOT
