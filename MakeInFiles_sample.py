@@ -19,7 +19,7 @@ ProcsPerJob = [40]*1000 # 40 simultaneous jobs is about all that we can safely h
 
 NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles"
 RunWindows = [(2401, 2423), (2424, 2699), (2700, 2852), (2853, 2891), (2892, 3117), (3118, 3326), (3327, 3700),
-              (3701, 3949), (3950, 4140), (4141, 4579), (4580, 4779), (4780, 5197), (5198, 5892)]
+              (3701, 3949), (3950, 4140), (4141, 4579), (4580, 4779), (4780, 5197), (5198, 5590), (5591, 5892)]
 def GetNoiseFile(runNo):
     noiseFile = ""
     for noiseWindow in RunWindows:
