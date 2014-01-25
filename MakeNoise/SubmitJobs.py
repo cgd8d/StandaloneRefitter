@@ -8,8 +8,8 @@ Queue = 'xxl'
 # Boundaries which are explicitly commented are confirmed exactly;
 # others are not independently confirmed by me with environmental correlations.
 # (I still trust them, though.)
-RunWindows = [(2424, 2699),
-              (2700, 2852), # Ebox 1 fan installed
+RunWindows = [(2424, 2690), # FEC voltage adjustment
+              (2691, 2852), # Ebox 1 fan installed
               (2853, 2891), # Ebox 2 fan installed
               (2892, 3117), # Power outage here.
               (3118, 3326), # APD board swap
