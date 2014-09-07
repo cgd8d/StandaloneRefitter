@@ -29,11 +29,11 @@ ROOT.gSystem.Load("libEXOUtilities")
 for runWindow in RunWindows:
     ds = ROOT.EXORunInfoManager.GetDataSet('Data/Processed/masked', '%i<=run&&run<=%i&&quality==\"GOLDEN\"&&runType==\"Data-Physics\"' % runWindow)
     runList = [str(ri.GetRunNumber()) for ri in ds]
-    subprocess.call(['bsub', '-q', Queue, '-R', 'rhel50', '-o', '%i_to_%i.log' % runWindow,
+    subprocess.call(['bsub', '-q', Queue, '-R', 'rhel60', '-o', '%i_to_%i.log' % runWindow,
                      './MakeNoiseFile', '%i_to_%i.dat' % runWindow, str(EntriesPerRun)] + runList)
 
 # We also generate a noise window for runs 2401-2423 (09-28-11 APD biases).
 # But, lacking physics data, we use a noise run there.
-subprocess.call(['bsub', '-q', Queue, '-R', 'rhel50', '-o', '2401_to_2423.log',
+subprocess.call(['bsub', '-q', Queue, '-R', 'rhel60', '-o', '2401_to_2423.log',
                  './MakeNoiseFile', '2401_to_2423.dat', '-1', '2401'])
 
