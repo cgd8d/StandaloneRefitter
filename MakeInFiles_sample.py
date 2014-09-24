@@ -7,7 +7,6 @@ ToDO:
 Extract the number of entries in the processed run file from metadata.
 Verify that the processed file I see is truly available -- don't want to crash later for missing file.
 """
-from __future__ import with_statement
 import os
 import glob
 import ROOT
@@ -15,9 +14,9 @@ ROOT.gROOT.SetBatch()
 ROOT.gSystem.Load("libEXOUtilities")
 
 DenoisedOutDir = "/scratch1/scratchdirs/claytond/LightOnly"
-ProcsPerJob = [40]*1000 # 40 simultaneous jobs is about all that we can safely handle.
+ProcsPerJob = [32]*1000 # 32 simultaneous jobs is about all that we can safely handle.  (Maybe 40.)
 
-NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles"
+NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles_ChangedBoundaries"
 RunWindows = [(2401, 2423), (2424, 2690), (2691, 2852), (2853, 2891), (2892, 3117), (3118, 3326), (3327, 3700),
               (3701, 3949), (3950, 4140), (4141, 4579), (4580, 4779), (4780, 5197), (5198, 5590), (5591, 5892)]
 def GetNoiseFile(runNo):
@@ -55,7 +54,7 @@ def JobForProc(procFile, runNo):
              xrootd_rawfile, # Raw file
              "%s/%i/denoised%s" % (DenoisedOutDir, runNo, FileBase), # Out file
              GetNoiseFile(runNo), # noise file
-             0, -1, 0.1, 1.6)) # Run parameters
+             0, -1, 0.1, 1.0)) # Run parameters
 
 OutRunList = []
 ProcList = []
