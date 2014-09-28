@@ -13,7 +13,7 @@ import ROOT
 ROOT.gROOT.SetBatch()
 ROOT.gSystem.Load("libEXOUtilities")
 
-DenoisedOutDir = "/scratch1/scratchdirs/claytond/LightOnly"
+DenoisedOutDir = "/scratch/scratchdirs/claytond/LightOnly"
 ProcsPerJob = [32]*1000 # 32 simultaneous jobs is about all that we can safely handle.  (Maybe 40.)
 
 NoiseFileBase = "/global/u1/c/claytond/NoiseCorrFiles_ChangedBoundaries"
