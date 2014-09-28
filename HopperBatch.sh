@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -q regular
 #PBS -l mppwidth=24
-#PBS -l walltime=00:30:00
+#PBS -l walltime=02:00:00
 #PBS -N Refitter
 #PBS -j oe
 
