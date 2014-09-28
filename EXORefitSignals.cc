@@ -71,7 +71,7 @@ EXORefitSignals::EXORefitSignals()
 #endif
   fVerbose(false),
   fDoRestarts(100),
-  fNumMulsToAccumulate(500),
+  fNumMulsToAccumulate(100),
   fGainCorrectionFactor(1),
   fLightmapFilename("data/lightmap/LightMaps.root"),
   fRThreshold(0.1),
