@@ -873,7 +873,12 @@ void EXORefitSignals::FlushEvents()
   // Don't return until asynchronous sends have also completed.
   while(not fPendingSends.empty()) {
     std::list<std::pair<boost::mpi::request, EventHandler*> >::iterator it = fPendingSends.begin();
-    it->first.wait();
+    boost::mpi::request rqt = it->first; 
+	// Don't use wait!  There seems to be an incompatiibility with threads
+	// here.  MPI_WaitAll (called by request::wait), will generate call-back
+	// functions, which may crash.  To get around this, do a fast poll on
+	// request::test().
+	while (!rqt.test());
     delete it->second;
     fPendingSends.erase(it);
   }
